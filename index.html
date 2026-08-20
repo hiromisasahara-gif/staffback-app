@@ -18,6 +18,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{--bg:#0a0a0f;--sf:#13131c;--sf2:#1a1a26;--bd:#272738;--ac:#c8a96e;--ac2:#e8c98e;--acd:rgba(200,169,110,.15);--tx:#e8e8f0;--mu:#6a6a8a;--sb:#9a9ab8;--gn:#5ecb8a;--rd:#e06c75;--bl:#7eb8f7;--gl:#f5d76e;--sl:#c0c0d0;--bz:#cd7f50;}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
@@ -313,6 +315,8 @@ tr:last-child td{border-bottom:none;}
   <div class="quick-row">
     <button class="qbtn" onclick="showPage('history')"><div class="qi">🕘</div>店舗別履歴</button>
     <button class="qbtn" onclick="showPage('stats')"><div class="qi">📊</div>集計を見る</button>
+    <button class="qbtn" onclick="showPage('review');switchRV(document.querySelector('.rv-seg-btn[data-rv=staffreport]'))"><div class="qi">🧑‍💼</div>スタッフ実績・PDF</button>
+    <button class="qbtn" onclick="openDeletedHistory()"><div class="qi">🗑️</div>削除履歴</button>
   </div>
   <div class="card">
     <div class="ct">本日の店舗別ランキング</div>
@@ -329,6 +333,25 @@ tr:last-child td{border-bottom:none;}
     <div class="field" style="margin-top:14px"><label>新しい店舗名</label><input type="text" id="ad-new-store" placeholder="例：〇〇店"></div>
     <button class="btn-s" onclick="addStore()">＋ 店舗を追加</button>
   </div>
+</div>
+
+<!-- 削除履歴（管理者専用） -->
+<div id="page-deleted" class="page">
+  <div class="hv-crumb">
+    <button class="hv-back" onclick="showPage('home')">‹</button>
+    <div class="hv-title">削除履歴</div>
+  </div>
+  <div class="field" id="del-store-filter" style="display:none">
+    <select class="fsel" id="del-store-sel" style="width:100%" onchange="renderDeletedRecords()"></select>
+  </div>
+  <div class="dnote">💡 削除された記録の内容・削除日時・削除した担当者を確認できます。ここから復元はできません。</div>
+  <div class="card" style="padding:0;overflow:hidden" id="del-card">
+    <div class="tw">
+      <table><thead><tr><th>削除日時</th><th>店舗</th><th>日付</th><th>スタッフ</th><th>お客様</th><th>売上</th><th>バック</th><th>同伴</th><th>削除者</th></tr></thead>
+      <tbody id="del-body"></tbody></table>
+    </div>
+  </div>
+  <div class="empty" id="del-empty" style="display:none"><div class="ei">🗑️</div>削除履歴はありません</div>
 </div>
 
 <!-- 売上入力 -->
@@ -562,6 +585,7 @@ tr:last-child td{border-bottom:none;}
     <button class="rv-seg-btn active" data-rv="staff" onclick="switchRV(this)">スタッフ成長推移</button>
     <button class="rv-seg-btn" data-rv="guest" onclick="switchRV(this)">お客様リピート</button>
     <button class="rv-seg-btn" data-rv="guest-sales" onclick="switchRV(this)">お客様売上</button>
+    <button class="rv-seg-btn" data-rv="staffreport" onclick="switchRV(this)">スタッフ実績</button>
   </div>
 
   <div id="rv-staff">
@@ -605,6 +629,23 @@ tr:last-child td{border-bottom:none;}
     <div class="card">
       <div class="ct">お客様別 売上詳細</div>
       <div id="rv-guest-sales-list"></div>
+    </div>
+  </div>
+
+  <div id="rv-staffreport" style="display:none">
+    <div class="field">
+      <select class="rv-staff-sel" id="sr-rep-staff" onchange="onStaffReportStaffChange()"><option value="">スタッフを選択</option></select>
+    </div>
+    <div class="mnrow">
+      <button class="mnav" onclick="changeStaffReportMonth(-1)">‹</button>
+      <div class="mlab" id="sr-rep-lab">-</div>
+      <button class="mnav" onclick="changeStaffReportMonth(1)">›</button>
+    </div>
+    <div class="kpi-grid" id="sr-rep-kpi" style="display:none"></div>
+    <button class="btn-s" id="sr-rep-pdf-btn" style="display:none;margin-bottom:12px" onclick="generateStaffPDF()">📄 PDFを作成して共有</button>
+    <div class="card">
+      <div class="ct">お客様別 月間実績</div>
+      <div id="sr-rep-list"></div>
     </div>
   </div>
 </div>
@@ -1117,7 +1158,7 @@ function renderHistoryDetail(){
       ${canDelete()?`<button class="bd2" onclick="askDel(${r.id})">削除</button>`:''}
     </td></tr>`).join('');
 }
-function canDelete(){ return myProfile && myProfile.role==='admin'; }
+function canDelete(){ return !!myProfile; } // 自店舗のみ表示されるため、スタッフの削除も安全
 // 管理者が「全店舗」表示のときだけ、店舗名をスタッフ名の前に添える
 function staffCellLabel(r){
   if(myProfile && myProfile.role==='admin' && adminStoreFilter==='all'){
@@ -1172,9 +1213,10 @@ function askDel(id){
   document.getElementById('conf-dlg').classList.add('open');
   document.body.style.overflow='hidden';
   document.getElementById('conf-ok').onclick=()=>{
+    const rec=recs.find(r=>r.id===delId);
     recs=recs.filter(r=>r.id!==delId);
     cacheLocal();closeConf();afterDataChange();toast('削除しました','var(--rd)');
-    persistDelete(delId);
+    if(rec) persistSoftDelete(rec);
   };
 }
 function closeConf(){document.getElementById('conf-dlg').classList.remove('open');document.body.style.overflow='';}
@@ -1494,9 +1536,11 @@ function switchRV(btn){
   document.getElementById('rv-staff').style.display       = rvTab==='staff'       ? 'block':'none';
   document.getElementById('rv-guest').style.display       = rvTab==='guest'       ? 'block':'none';
   document.getElementById('rv-guest-sales').style.display = rvTab==='guest-sales' ? 'block':'none';
+  document.getElementById('rv-staffreport').style.display = rvTab==='staffreport' ? 'block':'none';
   if(rvTab==='staff')       renderStaffGrowth();
   if(rvTab==='guest')       renderGuestRepeat();
   if(rvTab==='guest-sales') renderGuestSales();
+  if(rvTab==='staffreport') initStaffReport();
 }
 function initReview(){
   const staffs=[...new Set(activeRecs().map(r=>r.staff))].sort();
@@ -1506,6 +1550,160 @@ function initReview(){
   if(rvTab==='staff')       renderStaffGrowth();
   if(rvTab==='guest')       renderGuestRepeat();
   if(rvTab==='guest-sales') renderGuestSales();
+  if(rvTab==='staffreport') initStaffReport();
+}
+
+// ── スタッフ実績（同伴数・お客様別・PDF） ──
+let srStaff='', srY=new Date().getFullYear(), srM=new Date().getMonth()+1;
+function initStaffReport(){
+  const staffs=[...new Set(activeRecs().map(r=>r.staff))].sort();
+  const sel=document.getElementById('sr-rep-staff');
+  const cur=sel.value||srStaff;
+  sel.innerHTML='<option value="">スタッフを選択</option>'+staffs.map(s=>`<option value="${s}">${s}</option>`).join('');
+  sel.value = (cur && staffs.includes(cur)) ? cur : '';
+  srStaff=sel.value;
+  renderStaffReport();
+}
+function onStaffReportStaffChange(){
+  srStaff=document.getElementById('sr-rep-staff').value;
+  renderStaffReport();
+}
+function changeStaffReportMonth(d){
+  srM+=d; if(srM>12){srM=1;srY++;} if(srM<1){srM=12;srY--;}
+  renderStaffReport();
+}
+function getStaffReportData(){
+  const pf=srY+'-'+pad2(srM);
+  const list=activeRecs().filter(r=>r.staff===srStaff&&r.date.startsWith(pf));
+  const map={};
+  list.forEach(r=>{
+    if(!map[r.guest]) map[r.guest]={name:r.guest,count:0,total:0,back:0,dohan:0};
+    map[r.guest].count++; map[r.guest].total+=r.amount; map[r.guest].back+=r.back; if(r.dohan)map[r.guest].dohan++;
+  });
+  const guests=Object.values(map).sort((a,b)=>b.total-a.total);
+  return {
+    list, guests,
+    totalSales: list.reduce((s,r)=>s+r.amount,0),
+    totalBack: list.reduce((s,r)=>s+r.back,0),
+    totalCount: list.length,
+    totalDohan: list.filter(r=>r.dohan).length,
+    storeName: list.length ? list[0].storeName : (myProfile.role==='admin'&&adminStoreFilter!=='all'?storeNameById(adminStoreFilter):myProfile.storeName)
+  };
+}
+function renderStaffReport(){
+  document.getElementById('sr-rep-lab').textContent=srY+'年'+srM+'月';
+  const pdfBtn=document.getElementById('sr-rep-pdf-btn');
+  if(pdfBtn) pdfBtn.style.display = (myProfile&&myProfile.role==='admin'&&srStaff) ? 'block':'none';
+  if(!srStaff){
+    document.getElementById('sr-rep-kpi').style.display='none';
+    document.getElementById('sr-rep-list').innerHTML='<div class="empty"><div class="ei">👤</div>スタッフを選択してください</div>';
+    return;
+  }
+  const d=getStaffReportData();
+  document.getElementById('sr-rep-kpi').style.display='grid';
+  document.getElementById('sr-rep-kpi').innerHTML=`
+    <div class="kpi-box"><div class="kpi-label">月間売上</div><div class="kpi-val">${fmt(d.totalSales)}<span class="ku">円</span></div></div>
+    <div class="kpi-box"><div class="kpi-label">月間バック</div><div class="kpi-val">${fmt(d.totalBack)}<span class="ku">円</span></div></div>
+    <div class="kpi-box"><div class="kpi-label">来店件数</div><div class="kpi-val">${d.totalCount}<span class="ku">件</span></div></div>
+    <div class="kpi-box"><div class="kpi-label">同伴回数</div><div class="kpi-val">${d.totalDohan}<span class="ku">回</span></div></div>
+  `;
+  const el=document.getElementById('sr-rep-list');
+  if(!d.guests.length){ el.innerHTML='<div class="empty"><div class="ei">📋</div>この月の記録がありません</div>'; return; }
+  el.innerHTML=d.guests.map(g=>`<div class="repeat-item">
+    <div>
+      <div class="repeat-name">${g.name}</div>
+      <div class="repeat-meta">来店${g.count}回 ／ 同伴${g.dohan}回</div>
+    </div>
+    <div class="repeat-right"><div class="repeat-val">${fmt(g.total)}円</div><div class="repeat-sub">バック ${fmt(g.back)}円</div></div>
+  </div>`).join('');
+}
+async function generateStaffPDF(){
+  if(!srStaff){ toast('スタッフを選択してください','var(--rd)'); return; }
+  if(typeof html2canvas==='undefined' || !window.jspdf){ toast('PDF機能の読み込みに失敗しました。通信環境をご確認ください','var(--rd)'); return; }
+  const d=getStaffReportData();
+  toast('PDFを作成中…','var(--ac)');
+  const holder=document.createElement('div');
+  holder.style.position='fixed'; holder.style.left='-99999px'; holder.style.top='0';
+  holder.innerHTML=`
+    <div id="pdf-sheet" style="width:1000px;background:#0a0a0f;color:#e8e8f0;font-family:'Noto Sans JP',sans-serif;padding:56px 60px;box-sizing:border-box;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #c8a96e;padding-bottom:24px;margin-bottom:28px;">
+        <div>
+          <div style="font-size:13px;letter-spacing:.3em;color:#c8a96e;text-transform:uppercase;margin-bottom:8px;">Monthly Report</div>
+          <div style="font-size:30px;font-weight:700;">${srStaff} 様</div>
+          <div style="font-size:14px;color:#9a9ab8;margin-top:6px;">${d.storeName||''} ／ ${srY}年${srM}月度</div>
+        </div>
+        <div style="font-size:22px;color:#c8a96e;font-weight:700;letter-spacing:.1em;">★ BACK</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:32px;">
+        ${[['月間売上',fmt(d.totalSales)+'円'],['来店件数',d.totalCount+'件'],['同伴回数',d.totalDohan+'回'],['月間バック',fmt(d.totalBack)+'円']].map(([l,v])=>`
+          <div style="background:#13131c;border:1px solid #272738;border-radius:10px;padding:16px;">
+            <div style="font-size:10px;letter-spacing:.12em;color:#9a9ab8;text-transform:uppercase;margin-bottom:8px;">${l}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:20px;color:#e8c98e;">${v}</div>
+          </div>`).join('')}
+      </div>
+      <div style="font-size:11px;letter-spacing:.2em;color:#c8a96e;text-transform:uppercase;margin-bottom:14px;border-bottom:1px solid #272738;padding-bottom:8px;">お客様別 明細</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr>
+          <th style="text-align:left;padding:10px 8px;font-size:10px;letter-spacing:.1em;color:#9a9ab8;border-bottom:1px solid #272738;">お客様名</th>
+          <th style="text-align:right;padding:10px 8px;font-size:10px;letter-spacing:.1em;color:#9a9ab8;border-bottom:1px solid #272738;">来店回数</th>
+          <th style="text-align:right;padding:10px 8px;font-size:10px;letter-spacing:.1em;color:#9a9ab8;border-bottom:1px solid #272738;">売上金額</th>
+          <th style="text-align:right;padding:10px 8px;font-size:10px;letter-spacing:.1em;color:#9a9ab8;border-bottom:1px solid #272738;">同伴回数</th>
+          <th style="text-align:right;padding:10px 8px;font-size:10px;letter-spacing:.1em;color:#9a9ab8;border-bottom:1px solid #272738;">バック金額</th>
+        </tr></thead>
+        <tbody>
+          ${d.guests.length ? d.guests.map(g=>`<tr>
+            <td style="padding:11px 8px;border-bottom:1px solid #1e1e2c;">${g.name}</td>
+            <td style="padding:11px 8px;border-bottom:1px solid #1e1e2c;text-align:right;font-family:'DM Mono',monospace;">${g.count}回</td>
+            <td style="padding:11px 8px;border-bottom:1px solid #1e1e2c;text-align:right;font-family:'DM Mono',monospace;">${fmt(g.total)}円</td>
+            <td style="padding:11px 8px;border-bottom:1px solid #1e1e2c;text-align:right;font-family:'DM Mono',monospace;">${g.dohan}回</td>
+            <td style="padding:11px 8px;border-bottom:1px solid #1e1e2c;text-align:right;font-family:'DM Mono',monospace;color:#e8c98e;">${fmt(g.back)}円</td>
+          </tr>`).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:#6a6a8a;">この月の記録がありません</td></tr>`}
+        </tbody>
+      </table>
+      <div style="margin-top:36px;padding-top:20px;border-top:2px solid #c8a96e;display:flex;justify-content:flex-end;">
+        <div style="text-align:right;">
+          <div style="font-size:10px;letter-spacing:.12em;color:#9a9ab8;text-transform:uppercase;margin-bottom:6px;">月間合計バック</div>
+          <div style="font-family:'DM Mono',monospace;font-size:28px;color:#e8c98e;">${fmt(d.totalBack)}<span style="font-size:14px;color:#9a9ab8;margin-left:4px;">円</span></div>
+        </div>
+      </div>
+      <div style="margin-top:28px;font-size:10px;color:#6a6a8a;text-align:right;">作成日：${new Date().toLocaleDateString('ja-JP')}</div>
+    </div>`;
+  document.body.appendChild(holder);
+  try{
+    const target=holder.querySelector('#pdf-sheet');
+    const canvas=await html2canvas(target,{backgroundColor:'#0a0a0f',scale:2});
+    const { jsPDF } = window.jspdf;
+    const pdf=new jsPDF('p','mm','a4');
+    const pageW=210,pageH=297;
+    const imgW=pageW, imgH=canvas.height*imgW/canvas.width;
+    const imgData=canvas.toDataURL('image/jpeg',0.95);
+    let heightLeft=imgH, position=0;
+    pdf.addImage(imgData,'JPEG',0,position,imgW,imgH);
+    heightLeft-=pageH;
+    while(heightLeft>0){
+      position=heightLeft-imgH;
+      pdf.addPage();
+      pdf.addImage(imgData,'JPEG',0,position,imgW,imgH);
+      heightLeft-=pageH;
+    }
+    const fname=`${srStaff}_${srY}${pad2(srM)}_実績.pdf`;
+    const blob=pdf.output('blob');
+    let shared=false;
+    try{
+      const file=new File([blob],fname,{type:'application/pdf'});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        await navigator.share({files:[file],title:fname,text:`${srStaff}様 ${srY}年${srM}月度 実績`});
+        shared=true;
+      }
+    }catch(shareErr){ /* 共有キャンセル等は無視してダウンロードにフォールバック */ }
+    if(!shared){ pdf.save(fname); }
+    toast('✓ PDFを作成しました','var(--gn)');
+  }catch(e){
+    console.error(e);
+    toast('PDFの作成に失敗しました','var(--rd)');
+  }finally{
+    document.body.removeChild(holder);
+  }
 }
 function getMonthList(){
   if(!activeRecs().length)return [];
@@ -1683,8 +1881,8 @@ function renderGuestSales(){
 }
 
 // ── データ列変換（recs のキャメルケース ⇔ Supabaseのスネークケース） ──
-function toRow(r){ return {id:r.id,store_id:r.storeId,store_name:r.storeName,date:r.date,staff:r.staff,guest:r.guest,amount:r.amount,rate:r.rate,dohan:r.dohan,dohan_count:r.dohanCount||0,back:r.back,year:r.year,month:r.month,created_at:r.createdAt,updated_at:r.updatedAt,created_by:r.createdBy}; }
-function fromRow(row){ return {id:row.id,storeId:row.store_id,storeName:row.store_name,date:row.date,staff:row.staff,guest:row.guest,amount:row.amount,rate:row.rate,dohan:row.dohan,dohanCount:row.dohan_count||0,back:row.back,year:row.year,month:row.month,createdAt:row.created_at,updatedAt:row.updated_at,createdBy:row.created_by}; }
+function toRow(r){ return {id:r.id,store_id:r.storeId,store_name:r.storeName,date:r.date,staff:r.staff,guest:r.guest,amount:r.amount,rate:r.rate,dohan:r.dohan,dohan_count:r.dohanCount||0,back:r.back,year:r.year,month:r.month,created_at:r.createdAt,updated_at:r.updatedAt,created_by:r.createdBy,deleted_at:r.deletedAt||null,deleted_by:r.deletedBy||null,deleted_by_email:r.deletedByEmail||null}; }
+function fromRow(row){ return {id:row.id,storeId:row.store_id,storeName:row.store_name,date:row.date,staff:row.staff,guest:row.guest,amount:row.amount,rate:row.rate,dohan:row.dohan,dohanCount:row.dohan_count||0,back:row.back,year:row.year,month:row.month,createdAt:row.created_at,updatedAt:row.updated_at,createdBy:row.created_by,deletedAt:row.deleted_at,deletedBy:row.deleted_by,deletedByEmail:row.deleted_by_email}; }
 
 // ── 保存処理（Supabaseへ送信。失敗したら端末内に一時保存して後で自動送信） ──
 async function persistNew(rec){
@@ -1695,9 +1893,14 @@ async function persistUpdate(rec){
   try{ const {error}=await sb.from('records').upsert(toRow(rec)); if(error)throw error; updateSyncStatus(); }
   catch(e){ queueOp('upsert',rec); toast('⚠ オフラインのため一時保存しました（後で自動送信）','var(--ac)'); }
 }
-async function persistDelete(id){
-  try{ const {error}=await sb.from('records').delete().eq('id',id); if(error)throw error; updateSyncStatus(); }
-  catch(e){ queueOp('delete',{id}); toast('⚠ オフラインのため削除予約しました（後で自動反映）','var(--ac)'); }
+// 削除は物理削除ではなく soft delete（deleted_at / deleted_by を記録するUPDATE）
+async function persistSoftDelete(rec){
+  const payload={...rec, deletedAt:new Date().toISOString(), deletedBy:session.user.id, deletedByEmail:session.user.email};
+  try{
+    const {error}=await sb.from('records').update({deleted_at:payload.deletedAt,deleted_by:payload.deletedBy,deleted_by_email:payload.deletedByEmail}).eq('id',rec.id);
+    if(error) throw error;
+    updateSyncStatus();
+  }catch(e){ queueOp('softdelete',payload); toast('⚠ オフラインのため削除予約しました（後で自動反映）','var(--ac)'); }
 }
 async function flushQueue(manual){
   if(!pendingQueue.length){ if(manual)toast('保留中のデータはありません','var(--ac)'); return; }
@@ -1705,7 +1908,7 @@ async function flushQueue(manual){
   for(const item of pendingQueue){
     try{
       if(item.op==='upsert'){ const {error}=await sb.from('records').upsert(toRow(item.payload)); if(error)throw error; }
-      else if(item.op==='delete'){ const {error}=await sb.from('records').delete().eq('id',item.payload.id); if(error)throw error; }
+      else if(item.op==='softdelete'){ const {error}=await sb.from('records').update({deleted_at:item.payload.deletedAt,deleted_by:item.payload.deletedBy,deleted_by_email:item.payload.deletedByEmail}).eq('id',item.payload.id); if(error)throw error; }
     }catch(e){ remaining.push(item); }
   }
   pendingQueue=remaining; saveQueue(); updateSyncStatus();
@@ -1729,8 +1932,13 @@ function subscribeRealtime(){
         recs=recs.filter(r=>r.id!==payload.old.id);
       } else {
         const row=fromRow(payload.new);
-        const idx=recs.findIndex(r=>r.id===row.id);
-        if(idx>=0) recs[idx]=row; else recs.push(row);
+        if(row.deletedAt){
+          // 他端末で削除された記録は一覧から取り除く
+          recs=recs.filter(r=>r.id!==row.id);
+        } else {
+          const idx=recs.findIndex(r=>r.id===row.id);
+          if(idx>=0) recs[idx]=row; else recs.push(row);
+        }
       }
       cacheLocal();
       afterDataChange();
@@ -1769,7 +1977,7 @@ async function migrateLegacyIfNeeded(){
 // ── データ読み込み（Supabaseが正・オフライン時はキャッシュ） ──
 async function loadRecordsFromCloud(){
   try{
-    const {data,error}=await sb.from('records').select('*');
+    const {data,error}=await sb.from('records').select('*').is('deleted_at',null);
     if(error) throw error;
     recs=(data||[]).map(fromRow);
     cacheLocal();
@@ -1779,6 +1987,53 @@ async function loadRecordsFromCloud(){
   migrateRecs();
   updateDL();
   updateSyncStatus();
+}
+
+// ── 削除履歴（管理者のみ画面から呼び出す。RLSにより自店舗以外は取得できない） ──
+let deletedRecs=[];
+async function loadDeletedRecords(){
+  try{
+    const {data,error}=await sb.from('records').select('*').not('deleted_at','is',null).order('deleted_at',{ascending:false}).limit(300);
+    if(error) throw error;
+    deletedRecs=(data||[]).map(fromRow);
+  }catch(e){ deletedRecs=[]; toast('削除履歴の取得に失敗しました','var(--rd)'); }
+}
+async function openDeletedHistory(){
+  toast('読み込み中…','var(--ac)');
+  await loadDeletedRecords();
+  const wrap=document.getElementById('del-store-filter');
+  const sel=document.getElementById('del-store-sel');
+  if(myProfile.role==='admin'){
+    wrap.style.display='block';
+    sel.innerHTML='<option value="all">全店舗</option>'+stores.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  } else {
+    wrap.style.display='none';
+  }
+  showPage('deleted');
+  renderDeletedRecords();
+}
+function renderDeletedRecords(){
+  let list=deletedRecs;
+  if(myProfile.role==='admin'){
+    const v=document.getElementById('del-store-sel').value;
+    if(v && v!=='all') list=list.filter(r=>r.storeId===v);
+  }
+  const body=document.getElementById('del-body');
+  const card=document.getElementById('del-card');
+  const empty=document.getElementById('del-empty');
+  if(!list.length){ body.innerHTML=''; card.style.display='none'; empty.style.display='block'; return; }
+  card.style.display='block'; empty.style.display='none';
+  body.innerHTML=list.map(r=>`<tr>
+    <td class="tg">${r.deletedAt?new Date(r.deletedAt).toLocaleString('ja-JP'):''}</td>
+    <td>${r.storeName||''}</td>
+    <td class="tg">${r.date}</td>
+    <td style="font-weight:500">${r.staff}</td>
+    <td>${r.guest}</td>
+    <td class="tm">${fmt(r.amount)}</td>
+    <td class="ta">${fmt(r.back)}</td>
+    <td>${r.dohan?`<span class="badge badge-g">${r.dohanCount}名</span>`:'<span style="color:var(--bd)">—</span>'}</td>
+    <td style="font-size:11px;color:var(--mu);white-space:nowrap">${r.deletedByEmail||''}</td>
+  </tr>`).join('');
 }
 
 // ── 認証 ──
