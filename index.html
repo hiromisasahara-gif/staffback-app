@@ -1804,8 +1804,12 @@ async function doLogin(){
 async function doLogout(){
   if(!confirm('ログアウトしますか？')) return;
   closeSettings();
-  await sb.auth.signOut();
-  localStorage.removeItem(SK);
+  try{ if(realtimeChannel){ sb.removeChannel(realtimeChannel); realtimeChannel=null; } }catch(e){}
+  try{
+    // signOutが失敗・応答なしでも、最大3秒待ったら強制的に先へ進める
+    await Promise.race([ sb.auth.signOut(), new Promise(res=>setTimeout(res,3000)) ]);
+  }catch(e){ console.warn('signOut error',e); }
+  try{ localStorage.removeItem(SK); localStorage.removeItem(QK); }catch(e){}
   location.reload();
 }
 async function afterLogin(s){
