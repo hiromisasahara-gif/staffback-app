@@ -1593,7 +1593,7 @@ function getStaffReportData(){
 function renderStaffReport(){
   document.getElementById('sr-rep-lab').textContent=srY+'年'+srM+'月';
   const pdfBtn=document.getElementById('sr-rep-pdf-btn');
-  if(pdfBtn) pdfBtn.style.display = (myProfile&&myProfile.role==='admin'&&srStaff) ? 'block':'none';
+  if(pdfBtn) pdfBtn.style.display = (myProfile&&srStaff) ? 'block':'none'; // 店舗アカウントも自店舗スタッフのPDFを作成可能
   if(!srStaff){
     document.getElementById('sr-rep-kpi').style.display='none';
     document.getElementById('sr-rep-list').innerHTML='<div class="empty"><div class="ei">👤</div>スタッフを選択してください</div>';
