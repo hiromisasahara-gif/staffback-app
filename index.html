@@ -225,6 +225,28 @@ tr:last-child td{border-bottom:none;}
 .settings-sec-t{font-size:11px;letter-spacing:.1em;color:var(--ac);text-transform:uppercase;margin-bottom:10px;}
 .settings-note{font-size:11px;color:var(--mu);line-height:1.8;margin-bottom:10px;}
 
+/* ── ログイン画面 ── */
+#auth-gate{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;padding-top:calc(24px + env(safe-area-inset-top));padding-bottom:calc(24px + env(safe-area-inset-bottom));}
+.auth-card{width:100%;max-width:360px;background:var(--sf);border:1px solid var(--bd);border-radius:18px;padding:32px 26px;text-align:center;}
+.auth-logo{font-size:34px;color:var(--ac);margin-bottom:10px;}
+.auth-title{font-size:17px;font-weight:700;margin-bottom:4px;}
+.auth-sub{font-size:12px;color:var(--mu);margin-bottom:24px;}
+.auth-card .field{text-align:left;}
+.auth-note{font-size:11px;color:var(--mu);line-height:1.7;margin-top:16px;}
+#au-err{display:none;text-align:left;}
+#au-err.show{display:block;}
+
+/* ── 店舗チップ・同期状態 ── */
+.store-chip{font-size:10px;background:var(--acd);color:var(--ac);border:1px solid rgba(200,169,110,.3);border-radius:20px;padding:3px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sync-status{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mu);margin-bottom:14px;}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--gn);flex-shrink:0;}
+.sync-dot.off{background:var(--mu);}
+.sync-dot.pending{background:var(--ac);}
+.store-row{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid rgba(39,39,56,.5);gap:10px;}
+.store-row:last-child{border-bottom:none;}
+.store-row-name{font-size:13px;font-weight:500;}
+.store-row input{width:auto;flex:1;}
+
 /* ── BOTTOM NAV ── */
 .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:150;display:flex;background:rgba(10,10,15,.97);backdrop-filter:blur(14px);border-top:1px solid var(--bd);padding:5px 4px calc(5px + env(safe-area-inset-bottom));max-width:600px;margin:0 auto;}
 .bn-btn{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:7px 2px;min-height:52px;color:var(--mu);font-family:'Noto Sans JP',sans-serif;font-size:10px;cursor:pointer;border-radius:12px;transition:color .15s;}
@@ -238,12 +260,33 @@ tr:last-child td{border-bottom:none;}
 </head>
 <body>
 
-<div class="topbar">
-  <div class="brand">★ スタッフバック管理</div>
-  <button class="gear" onclick="openSettings()" aria-label="設定">⚙️</button>
+<!-- ログイン画面 -->
+<div id="auth-gate">
+  <div class="auth-card">
+    <div class="auth-logo">★</div>
+    <div class="auth-title">スタッフバック管理</div>
+    <div class="auth-sub">店舗アカウントでログインしてください</div>
+    <div class="field"><label>メールアドレス</label><input type="text" id="au-email" autocomplete="username" inputmode="email" placeholder="store@example.com"></div>
+    <div class="field"><label>パスワード</label><input type="password" id="au-pass" autocomplete="current-password" placeholder="••••••••"></div>
+    <div class="err" id="au-err" style="margin-bottom:10px">メールアドレスかパスワードが違います</div>
+    <button class="btn-p" id="au-btn" onclick="doLogin()">ログイン</button>
+    <div class="auth-note">一度ログインすると、この端末では次回から自動的にログインした状態になります。</div>
+  </div>
 </div>
 
-<!-- ホーム -->
+<div id="app-root" style="display:none">
+
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:9px;min-width:0">
+    <div class="brand">★ バック管理</div>
+    <div class="store-chip" id="store-chip" style="display:none"></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:4px">
+    <button class="gear" onclick="openSettings()" aria-label="設定">⚙️</button>
+  </div>
+</div>
+
+<!-- ホーム（店舗スタッフ） -->
 <div id="page-home" class="page active">
   <div class="hm-hero">
     <div class="hm-hero-date" id="hm-date">-</div>
@@ -262,9 +305,39 @@ tr:last-child td{border-bottom:none;}
   </div>
 </div>
 
+<!-- 管理者ダッシュボード -->
+<div id="page-admin" class="page">
+  <div class="ph"><div class="ey">Admin Dashboard</div><h2>管理者ダッシュボード</h2></div>
+  <div class="sync-status" id="sync-status"></div>
+  <div class="kpi-grid" id="ad-kpi"></div>
+  <div class="quick-row">
+    <button class="qbtn" onclick="showPage('history')"><div class="qi">🕘</div>店舗別履歴</button>
+    <button class="qbtn" onclick="showPage('stats')"><div class="qi">📊</div>集計を見る</button>
+  </div>
+  <div class="card">
+    <div class="ct">本日の店舗別ランキング</div>
+    <div id="ad-today-rank"></div>
+  </div>
+  <div class="card">
+    <div class="ct">店舗別 今月の推移</div>
+    <div class="cw"><canvas id="chart-admin-store"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="ct">店舗の追加・変更</div>
+    <div class="settings-note">新しい店舗を追加できます。ログイン用アカウントの作成だけは、引き続きSupabaseの管理画面での操作が必要です。</div>
+    <div id="ad-store-list"></div>
+    <div class="field" style="margin-top:14px"><label>新しい店舗名</label><input type="text" id="ad-new-store" placeholder="例：〇〇店"></div>
+    <button class="btn-s" onclick="addStore()">＋ 店舗を追加</button>
+  </div>
+</div>
+
 <!-- 売上入力 -->
 <div id="page-entry" class="page">
   <div class="ph"><div class="ey">New Entry</div><h2>売上入力</h2></div>
+  <div class="card" id="e-store-card" style="display:none">
+    <div class="ct">入力する店舗</div>
+    <select class="fsel" id="e-store" style="width:100%"></select>
+  </div>
   <div class="card">
     <div class="ct">基本情報</div>
     <div class="field"><label>日付</label><input type="date" id="e-date"></div>
@@ -300,6 +373,9 @@ tr:last-child td{border-bottom:none;}
 <!-- 履歴（年→月ドリルダウン） -->
 <div id="page-history" class="page">
   <div class="ph"><div class="ey">History</div><h2>履歴</h2></div>
+  <div class="field" id="hv-store-filter" style="display:none">
+    <select class="fsel" id="hv-store-sel" style="width:100%" onchange="setAdminStoreFilter(this.value,'history')"></select>
+  </div>
 
   <!-- ① 年を選ぶ -->
   <div id="hv-years">
@@ -366,6 +442,9 @@ tr:last-child td{border-bottom:none;}
 <!-- 集計（月次・年次・ランキング） -->
 <div id="page-stats" class="page">
   <div class="ph"><div class="ey">Statistics</div><h2>集計</h2></div>
+  <div class="field" id="st-store-filter" style="display:none">
+    <select class="fsel" id="st-store-sel" style="width:100%" onchange="setAdminStoreFilter(this.value,'stats')"></select>
+  </div>
   <div class="rv-seg">
     <button class="rv-seg-btn active" data-st="monthly" onclick="switchStatsTab(this)">月次</button>
     <button class="rv-seg-btn" data-st="yearly" onclick="switchStatsTab(this)">年次</button>
@@ -475,6 +554,9 @@ tr:last-child td{border-bottom:none;}
 <!-- 振り返り -->
 <div id="page-review" class="page">
   <div class="ph"><div class="ey">Review</div><h2>振り返り</h2></div>
+  <div class="field" id="rv-store-filter" style="display:none">
+    <select class="fsel" id="rv-store-sel" style="width:100%" onchange="setAdminStoreFilter(this.value,'review')"></select>
+  </div>
 
   <div class="rv-seg">
     <button class="rv-seg-btn active" data-rv="staff" onclick="switchRV(this)">スタッフ成長推移</button>
@@ -604,18 +686,15 @@ tr:last-child td{border-bottom:none;}
     </div>
 
     <div class="settings-sec">
-      <div class="settings-sec-t">☁ クラウド同期（Supabase・任意）</div>
-      <div class="settings-note">機種変更してもデータを残したい、複数端末で見たい場合に設定してください。設定しなくても、この端末内には今まで通りずっとデータが残ります。</div>
-      <div class="field"><label>Supabase Project URL</label><input type="text" id="cf-url" placeholder="https://xxxxx.supabase.co"></div>
-      <div class="field"><label>Supabase anon key</label><input type="text" id="cf-key" placeholder="ey..."></div>
-      <div class="trow" style="margin-top:14px"><div style="font-size:13px;font-weight:500">クラウド同期を有効にする</div>
-        <label class="toggle"><input type="checkbox" id="cf-enabled"><div class="tt"></div></label>
-      </div>
-      <div class="cloud-status" id="cf-status">現在: 端末内保存のみ(クラウド同期オフ)</div>
-      <div class="mfooter" style="margin-top:0">
-        <button class="bcan" onclick="cloudSyncNow()">今すぐ同期</button>
-        <button class="bsave" onclick="saveCloudCfg()">保　存</button>
-      </div>
+      <div class="settings-sec-t">☁ クラウド同期</div>
+      <div class="cloud-status" id="cf-status">-</div>
+      <button class="btn-s" onclick="flushQueue(true)" style="margin-top:10px">今すぐ同期</button>
+    </div>
+
+    <div class="settings-sec">
+      <div class="settings-sec-t">アカウント</div>
+      <div class="cloud-status" id="acct-status">-</div>
+      <button class="btn-s" onclick="doLogout()" style="margin-top:10px;color:var(--rd);border-color:rgba(224,108,117,.3)">ログアウト</button>
     </div>
   </div>
 </div>
@@ -637,18 +716,35 @@ tr:last-child td{border-bottom:none;}
 
 <!-- 下部メニュー -->
 <nav class="bottomnav">
-  <button class="bn-btn active" data-page="home" onclick="showPage('home')"><div class="bi">🏠</div>ホーム</button>
+  <button class="bn-btn active" data-page="home" onclick="showPage('home')"><div class="bi" id="bn-home-icon">🏠</div><span id="bn-home-label">ホーム</span></button>
   <button class="bn-btn" data-page="entry" onclick="showPage('entry')"><div class="bi">✏️</div>入力</button>
   <button class="bn-btn" data-page="history" onclick="showPage('history')"><div class="bi">🕘</div>履歴</button>
   <button class="bn-btn" data-page="stats" onclick="showPage('stats')"><div class="bi">📊</div>集計</button>
   <button class="bn-btn" data-page="review" onclick="showPage('review')"><div class="bi">📈</div>振り返り</button>
 </nav>
 
+</div><!-- /#app-root -->
+
 <script>
-const SK='staff_back_v2';
+const SK='staff_back_cache_v1';
+const QK='staff_back_pending_v1';
+const SUPABASE_URL='https://gbjqyjfocjohppivfjns.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_64o_B0D_sjfh6vxm8PWtDg_6H_QRbTH';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+
 let recs=[],eRate=null,mRate=null,sP='all',gP='all',anY=new Date().getFullYear(),anM=new Date().getMonth()+1,anTab='pie',pieC=null,comboC=null,editId=null,delId=null;
 let currentPage='home',hvView='years',hvYear=null,hvMonth=null,statsTab='monthly',rkView='staff',statY=new Date().getFullYear(),yearlyChart=null;
 const COLORS=['#c8a96e','#5ecb8a','#7eb8f7','#e06c75','#d4a5f5','#f5a623','#50e3c2','#ff7eb3','#a8e063','#f7d154'];
+
+// ── マルチ店舗・認証まわりの状態 ──
+let session=null, myProfile=null, stores=[], adminStoreFilter='all', pendingQueue=[], adminStoreChart=null, realtimeChannel=null;
+function activeRecs(){
+  if(myProfile && myProfile.role==='admin' && adminStoreFilter!=='all'){
+    return recs.filter(r=>r.storeId===adminStoreFilter);
+  }
+  return recs;
+}
+function storeNameById(id){ const s=stores.find(x=>x.id===id); return s?s.name:'（不明な店舗）'; }
 
 function pad2(n){return String(n).padStart(2,'0');}
 function f50(n){return Math.floor(n/50)*50;}
@@ -671,7 +767,7 @@ function toast(msg,color){
   t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);
 }
 
-// ── 記録データの正規化（id / 年 / 月 / 作成日時 / 更新日時 を必ず持たせる） ──
+// ── 記録データの正規化（id / 店舗 / 年 / 月 / 作成日時 / 更新日時 を必ず持たせる） ──
 function normalizeRecord(r){
   const dateStr = r.date || today();
   const parts = dateStr.split('-').map(Number);
@@ -681,6 +777,8 @@ function normalizeRecord(r){
   const amt = Number(r.amount)||0, rate = Number(r.rate)||0, dh = !!r.dohan, cnt = r.dohanCount||0;
   return {
     id: r.id || (Date.now()+Math.floor(Math.random()*1000)),
+    storeId: r.storeId || (myProfile ? myProfile.storeId : null),
+    storeName: r.storeName || (myProfile ? myProfile.storeName : ''),
     date: dateStr,
     staff: r.staff || '未設定',
     guest: r.guest || '未設定',
@@ -692,48 +790,74 @@ function normalizeRecord(r){
     year: yy,
     month: mm,
     createdAt: createdGuess,
-    updatedAt: r.updatedAt || createdGuess
+    updatedAt: r.updatedAt || createdGuess,
+    createdBy: r.createdBy || (session ? session.user.id : null)
   };
 }
-function load(){try{recs=JSON.parse(localStorage.getItem(SK))||[];}catch{recs=[];}}
-function save(){try{localStorage.setItem(SK,JSON.stringify(recs));}catch(e){toast('保存失敗','var(--rd)');}}
+// SK は「クラウドから取得した内容のオフライン閲覧用キャッシュ」。正式なデータはSupabase側。
+function loadLocalCache(){ try{ recs=JSON.parse(localStorage.getItem(SK))||[]; }catch{ recs=[]; } }
+function cacheLocal(){ try{ localStorage.setItem(SK,JSON.stringify(recs)); }catch(e){} }
+function save(){ cacheLocal(); }
 function migrateRecs(){ recs = recs.map(normalizeRecord); }
+
+function loadQueue(){ try{ pendingQueue=JSON.parse(localStorage.getItem(QK))||[]; }catch{ pendingQueue=[]; } }
+function saveQueue(){ try{ localStorage.setItem(QK,JSON.stringify(pendingQueue)); }catch(e){} }
+function queueOp(op,payload){ pendingQueue.push({op,payload,ts:Date.now()}); saveQueue(); updateSyncStatus(); }
 
 // 変更後に「今表示している画面」だけを再描画する
 function afterDataChange(){
   updateDL();
-  if(currentPage==='home') renderHome();
+  if(currentPage==='home'){ if(myProfile&&myProfile.role==='admin') renderAdminHome(); else renderHome(); }
   else if(currentPage==='history') renderHistory();
   else if(currentPage==='stats') renderStatsTab();
   else if(currentPage==='review') initReview();
+  updateSyncStatus();
 }
 
 // NAV
 function showPage(id){
+  const isAdmin = myProfile && myProfile.role==='admin';
+  const realId = (id==='home' && isAdmin) ? 'admin' : id;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.bn-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('page-'+id).classList.add('active');
+  document.getElementById('page-'+realId).classList.add('active');
   const btn=document.querySelector('.bn-btn[data-page="'+id+'"]');
   if(btn)btn.classList.add('active');
   currentPage=id;
   window.scrollTo(0,0);
-  if(id==='home') renderHome();
+  // 管理者のみ：店舗フィルターの表示切替
+  document.getElementById('hv-store-filter').style.display = (isAdmin && id==='history') ? 'block':'none';
+  document.getElementById('st-store-filter').style.display = (isAdmin && id==='stats') ? 'block':'none';
+  document.getElementById('rv-store-filter').style.display = (isAdmin && id==='review') ? 'block':'none';
+  if(id==='home'){ if(isAdmin) renderAdminHome(); else renderHome(); }
   if(id==='history'){ renderHistory(); }
   if(id==='stats'){ renderStatsTab(); }
   if(id==='review'){ initReview(); }
 }
+function setAdminStoreFilter(v,fromPage){
+  adminStoreFilter=v;
+  ['hv-store-sel','st-store-sel','rv-store-sel'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=v; });
+  if(fromPage==='history'){ hvView='years'; renderHistory(); }
+  if(fromPage==='stats') renderStatsTab();
+  if(fromPage==='review') initReview();
+}
+function populateStoreFilters(){
+  const opts='<option value="all">全店舗</option>'+stores.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  ['hv-store-sel','st-store-sel','rv-store-sel'].forEach(id=>{ const el=document.getElementById(id); if(el){ el.innerHTML=opts; el.value=adminStoreFilter; } });
+}
 
-// ── ホーム ──
+// ── ホーム（店舗スタッフ） ──
 function renderHome(){
   const t=today();
   const now=new Date();
   document.getElementById('hm-date').textContent = now.getFullYear()+'年'+(now.getMonth()+1)+'月'+now.getDate()+'日';
-  const todayRecs = recs.filter(r=>r.date===t);
+  const src=activeRecs();
+  const todayRecs = src.filter(r=>r.date===t);
   const y=now.getFullYear(), m=now.getMonth()+1;
   const pf=y+'-'+pad2(m);
-  const monthRecs = recs.filter(r=>r.date.startsWith(pf));
+  const monthRecs = src.filter(r=>r.date.startsWith(pf));
   let pm=m-1,py=y; if(pm<1){pm=12;py--;}
-  const prevRecs = recs.filter(r=>r.date.startsWith(py+'-'+pad2(pm)));
+  const prevRecs = src.filter(r=>r.date.startsWith(py+'-'+pad2(pm)));
   const todayBack=todayRecs.reduce((s,r)=>s+r.back,0);
   const monthBack=monthRecs.reduce((s,r)=>s+r.back,0);
   const prevBack=prevRecs.reduce((s,r)=>s+r.back,0);
@@ -741,9 +865,9 @@ function renderHome(){
     <div class="kpi-box"><div class="kpi-label">本日のバック</div><div class="kpi-val">${fmt(todayBack)}<span class="ku">円</span></div><div class="kpi-sub">${todayRecs.length}件</div></div>
     <div class="kpi-box"><div class="kpi-label">今月のバック</div><div class="kpi-val">${fmt(monthBack)}<span class="ku">円</span></div><div class="kpi-sub">${monthRecs.length}件</div></div>
     <div class="kpi-box"><div class="kpi-label">前月比</div><div class="kpi-val" style="font-size:16px;color:${!prevBack?'var(--mu)':(monthBack>=prevBack?'var(--gn)':'var(--rd)')}">${!prevBack?'—':(monthBack>=prevBack?'+':'')+Math.round((monthBack-prevBack)/prevBack*100)+'%'}</div></div>
-    <div class="kpi-box"><div class="kpi-label">総記録数</div><div class="kpi-val">${recs.length}<span class="ku">件</span></div></div>
+    <div class="kpi-box"><div class="kpi-label">総記録数</div><div class="kpi-val">${src.length}<span class="ku">件</span></div></div>
   `;
-  const recent=[...recs].sort((a,b)=> b.date.localeCompare(a.date) || (b.id-a.id) ).slice(0,5);
+  const recent=[...src].sort((a,b)=> b.date.localeCompare(a.date) || (b.id-a.id) ).slice(0,5);
   const el=document.getElementById('hm-recent');
   if(!recent.length){el.innerHTML='<div class="empty"><div class="ei">📝</div>まだ記録がありません<br>「入力」から登録してみましょう</div>';return;}
   el.innerHTML=recent.map(r=>`<div class="ri" style="cursor:pointer" onclick="openEdit(${r.id})">
@@ -755,8 +879,111 @@ function renderHome(){
   </div>`).join('');
 }
 
+// ── 管理者ダッシュボード ──
+function renderAdminHome(){
+  const t=today(), now=new Date();
+  const y=now.getFullYear(), m=now.getMonth()+1, pf=y+'-'+pad2(m);
+  let pm=m-1,py=y; if(pm<1){pm=12;py--;}
+  const todayAll=recs.filter(r=>r.date===t);
+  const monthAll=recs.filter(r=>r.date.startsWith(pf));
+  const prevAll=recs.filter(r=>r.date.startsWith(py+'-'+pad2(pm)));
+  const todayBack=todayAll.reduce((s,r)=>s+r.back,0);
+  const monthBack=monthAll.reduce((s,r)=>s+r.back,0);
+  const monthSales=monthAll.reduce((s,r)=>s+r.amount,0);
+  const prevBack=prevAll.reduce((s,r)=>s+r.back,0);
+  document.getElementById('ad-kpi').innerHTML=`
+    <div class="kpi-box"><div class="kpi-label">本日の全店舗合計</div><div class="kpi-val">${fmt(todayBack)}<span class="ku">円</span></div><div class="kpi-sub">${todayAll.length}件</div></div>
+    <div class="kpi-box"><div class="kpi-label">今月の全店舗合計</div><div class="kpi-val">${fmt(monthBack)}<span class="ku">円</span></div><div class="kpi-sub">売上 ${fmt(monthSales)}円</div></div>
+    <div class="kpi-box"><div class="kpi-label">前月比</div><div class="kpi-val" style="font-size:16px;color:${!prevBack?'var(--mu)':(monthBack>=prevBack?'var(--gn)':'var(--rd)')}">${!prevBack?'—':(monthBack>=prevBack?'+':'')+Math.round((monthBack-prevBack)/prevBack*100)+'%'}</div></div>
+    <div class="kpi-box"><div class="kpi-label">総記録数</div><div class="kpi-val">${recs.length}<span class="ku">件</span></div></div>
+  `;
+  // 本日の店舗別ランキング
+  const byStoreToday={};
+  stores.forEach(s=>{ byStoreToday[s.id]={name:s.name,back:0,sales:0,count:0}; });
+  todayAll.forEach(r=>{ if(!byStoreToday[r.storeId])byStoreToday[r.storeId]={name:r.storeName,back:0,sales:0,count:0}; byStoreToday[r.storeId].back+=r.back; byStoreToday[r.storeId].sales+=r.amount; byStoreToday[r.storeId].count++; });
+  const rankArr=Object.values(byStoreToday).sort((a,b)=>b.back-a.back);
+  const maxB=rankArr[0]?.back||1;
+  const rankEl=document.getElementById('ad-today-rank');
+  if(!stores.length){ rankEl.innerHTML='<div class="empty"><div class="ei">🏪</div>店舗が登録されていません</div>'; }
+  else{
+    rankEl.innerHTML=rankArr.map((s,i)=>{
+      const pct=Math.round(s.back/maxB*100);
+      const rc=['rn1','rn2','rn3'][i]||'rnn';
+      const med=['🥇','🥈','🥉'][i]||(i+1);
+      return `<div class="ri"><div class="rn ${rc}">${med}</div><div class="rin"><div class="rnm">${s.name}</div><div class="rmt">${s.count}件</div><div class="bw"><div class="bf" style="width:${pct}%"></div></div></div><div class="rv">${fmt(s.back)}<small>円</small></div></div>`;
+    }).join('');
+  }
+  drawAdminStoreChart();
+  renderStoreManageList();
+}
+function drawAdminStoreChart(){
+  const now=new Date(); const y=now.getFullYear(); const days=new Date(y,now.getMonth()+1,0).getDate();
+  const pf=y+'-'+pad2(now.getMonth()+1);
+  const monthAll=recs.filter(r=>r.date.startsWith(pf));
+  const byStore={};
+  stores.forEach(s=>{ byStore[s.name]=new Array(days).fill(0); });
+  monthAll.forEach(r=>{
+    const d=Number(r.date.slice(8,10))-1;
+    if(!byStore[r.storeName])byStore[r.storeName]=new Array(days).fill(0);
+    if(d>=0&&d<days) byStore[r.storeName][d]+=r.back;
+  });
+  if(adminStoreChart){adminStoreChart.destroy();adminStoreChart=null;}
+  const ctx=document.getElementById('chart-admin-store').getContext('2d');
+  const names=Object.keys(byStore);
+  if(!names.length || !monthAll.length){ ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height); return; }
+  const datasets=names.map((n,i)=>{
+    let running=0;
+    return {label:n,data:byStore[n].map(v=>running+=v),borderColor:COLORS[i%COLORS.length],backgroundColor:COLORS[i%COLORS.length]+'22',borderWidth:2,pointRadius:0,tension:0.25};
+  });
+  adminStoreChart=new Chart(ctx,{type:'line',data:{labels:Array.from({length:days},(_,i)=>(i+1)+'日'),datasets},options:{responsive:true,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#9a9ab8',font:{size:11},boxWidth:12,padding:12}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}：${fmt(c.parsed.y)}円`}}},scales:{x:{ticks:{color:'#6a6a8a',font:{size:9},maxTicksLimit:8},grid:{color:'rgba(39,39,56,.4)'}},y:{ticks:{color:'#c8a96e',font:{size:10},callback:v=>fmt(v)},grid:{color:'rgba(39,39,56,.4)'},min:0}},animation:{duration:400}}});
+}
+function renderStoreManageList(){
+  const el=document.getElementById('ad-store-list');
+  if(!stores.length){ el.innerHTML='<div class="empty" style="padding:14px 0">店舗がありません</div>'; return; }
+  el.innerHTML=stores.map(s=>`<div class="store-row"><div class="store-row-name">${s.name}</div><button class="be" onclick="renameStore('${s.id}','${s.name.replace(/'/g,"\\'")}')">名前を変更</button></div>`).join('');
+}
+async function addStore(){
+  const nameEl=document.getElementById('ad-new-store');
+  const name=nameEl.value.trim();
+  if(!name){ toast('店舗名を入力してください','var(--rd)'); return; }
+  try{
+    const {data,error}=await sb.from('stores').insert({name}).select().single();
+    if(error) throw error;
+    stores.push({id:data.id,name:data.name});
+    stores.sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+    populateStoreFilters(); populateEntryStoreSelect(); renderStoreManageList();
+    nameEl.value='';
+    toast('✓ 店舗を追加しました。ログイン用アカウントの作成はSupabaseの管理画面で行ってください','var(--ac)');
+  }catch(e){ toast('追加に失敗しました：'+(e.message||''),'var(--rd)'); }
+}
+async function renameStore(id,oldName){
+  const name=prompt('新しい店舗名を入力してください',oldName);
+  if(!name || name===oldName) return;
+  try{
+    const {error}=await sb.from('stores').update({name}).eq('id',id);
+    if(error) throw error;
+    const s=stores.find(x=>x.id===id); if(s)s.name=name;
+    recs.forEach(r=>{ if(r.storeId===id) r.storeName=name; });
+    cacheLocal();
+    populateStoreFilters(); populateEntryStoreSelect(); renderStoreManageList();
+    toast('✓ 店舗名を変更しました','var(--ac)');
+  }catch(e){ toast('変更に失敗しました：'+(e.message||''),'var(--rd)'); }
+}
+
 // ENTRY
 document.getElementById('e-date').value=today();
+function populateEntryStoreSelect(){
+  const card=document.getElementById('e-store-card');
+  const sel=document.getElementById('e-store');
+  if(myProfile && myProfile.role==='admin'){
+    card.style.display='block';
+    const cur=sel.value;
+    sel.innerHTML=stores.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+    if(cur && stores.some(s=>s.id===cur)) sel.value=cur;
+  } else {
+    card.style.display='none';
+  }
+}
 document.getElementById('erg').addEventListener('click',e=>{
   const b=e.target.closest('.rb');if(!b)return;
   document.querySelectorAll('#erg .rb').forEach(x=>x.classList.remove('active'));
@@ -790,11 +1017,17 @@ function addRecord(){
   if(!eRate){document.getElementById('err-rate').classList.add('show');ok=false;}
   else document.getElementById('err-rate').classList.remove('show');
   if(!ok)return;
+  let storeId=myProfile.storeId, storeName=myProfile.storeName;
+  if(myProfile.role==='admin'){
+    storeId=document.getElementById('e-store').value;
+    storeName=storeNameById(storeId);
+    if(!storeId){ toast('店舗を選択してください','var(--rd)'); return; }
+  }
   const now=new Date().toISOString();
   const [yy,mm]=date.split('-').map(Number);
-  const rec={id:Date.now(),date,staff:staff||'未設定',guest:guest||'未設定',amount:amt,rate:eRate,dohan:dh,dohanCount:dh?cnt:0,back:calcBack(amt,eRate,dh,cnt),year:yy,month:mm,createdAt:now,updatedAt:now};
+  const rec={id:Date.now(),storeId,storeName,date,staff:staff||'未設定',guest:guest||'未設定',amount:amt,rate:eRate,dohan:dh,dohanCount:dh?cnt:0,back:calcBack(amt,eRate,dh,cnt),year:yy,month:mm,createdAt:now,updatedAt:now,createdBy:session.user.id};
   recs.push(rec);
-  save();cloudUpsert(rec);afterDataChange();
+  cacheLocal();afterDataChange();persistNew(rec);
   document.getElementById('e-amt').value='';
   document.getElementById('e-staff').value='';
   document.getElementById('e-guest').value='';
@@ -813,7 +1046,7 @@ function updateDL(){
 
 // ── 履歴：年→月ドリルダウン ──
 function getHistoryYears(){
-  return [...new Set(recs.map(r=>r.date.slice(0,4)))].sort((a,b)=>b-a);
+  return [...new Set(activeRecs().map(r=>r.date.slice(0,4)))].sort((a,b)=>b-a);
 }
 function renderHistory(){
   document.getElementById('hv-years').style.display  = hvView==='years'  ? 'block':'none';
@@ -830,7 +1063,7 @@ function renderHistoryYears(){
   const el=document.getElementById('hv-year-grid');
   if(!years.length){el.innerHTML='<div class="empty"><div class="ei">🗂️</div>まだ記録がありません<br>「入力」から登録してみましょう</div>';return;}
   el.innerHTML=years.map(y=>{
-    const list=recs.filter(r=>r.date.startsWith(y));
+    const list=activeRecs().filter(r=>r.date.startsWith(y));
     const back=list.reduce((s,r)=>s+r.back,0);
     return `<div class="yr-card" onclick="openHistoryYear('${y}')"><div class="yr-y">${y}年</div><div class="yr-meta">${list.length}件<br>バック計 ${fmt(back)}円</div></div>`;
   }).join('');
@@ -842,7 +1075,7 @@ function renderHistoryMonths(){
   let html='';
   for(let m=1;m<=12;m++){
     const pf=hvYear+'-'+pad2(m);
-    const list=recs.filter(r=>r.date.startsWith(pf));
+    const list=activeRecs().filter(r=>r.date.startsWith(pf));
     const back=list.reduce((s,r)=>s+r.back,0);
     html+=`<div class="mo-cell${list.length?'':' empty2'}" onclick="openHistoryMonth(${m})"><div class="mo-m">${m}月</div><div class="mo-v">${list.length?fmt(back)+'円':'—'}</div></div>`;
   }
@@ -855,11 +1088,11 @@ function renderHistoryDetail(){
   const y=hvYear, m=hvMonth;
   document.getElementById('hv-detail-title').textContent=y+'年'+m+'月';
   const pf=y+'-'+pad2(m);
-  const list=recs.filter(r=>r.date.startsWith(pf)).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+  const list=activeRecs().filter(r=>r.date.startsWith(pf)).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
   const totalSales=list.reduce((s,r)=>s+r.amount,0);
   const totalBack=list.reduce((s,r)=>s+r.back,0);
   let pm=Number(m)-1,py=Number(y); if(pm<1){pm=12;py--;}
-  const prevList=recs.filter(r=>r.date.startsWith(py+'-'+pad2(pm)));
+  const prevList=activeRecs().filter(r=>r.date.startsWith(py+'-'+pad2(pm)));
   const prevBack=prevList.reduce((s,r)=>s+r.back,0);
   document.getElementById('hv-detail-kpi').innerHTML=`
     <div class="kpi-box"><div class="kpi-label">月間売上</div><div class="kpi-val">${fmt(totalSales)}<span class="ku">円</span></div></div>
@@ -874,15 +1107,23 @@ function renderHistoryDetail(){
   card.style.display='block';empty.style.display='none';
   body.innerHTML=list.map(r=>`<tr>
     <td class="tg">${r.date}</td>
-    <td style="font-weight:500">${r.staff}</td>
+    <td style="font-weight:500">${staffCellLabel(r)}</td>
     <td>${r.guest}</td>
     <td class="tm">${fmt(r.amount)}</td>
     <td>${r.dohan?`<span class="badge badge-g">${r.dohanCount}名</span>`:'<span style="color:var(--bd)">—</span>'}</td>
     <td class="ta">${fmt(r.back)}</td>
     <td style="white-space:nowrap">
       <button class="be" onclick="openEdit(${r.id})">修正</button>
-      <button class="bd2" onclick="askDel(${r.id})">削除</button>
+      ${canDelete()?`<button class="bd2" onclick="askDel(${r.id})">削除</button>`:''}
     </td></tr>`).join('');
+}
+function canDelete(){ return myProfile && myProfile.role==='admin'; }
+// 管理者が「全店舗」表示のときだけ、店舗名をスタッフ名の前に添える
+function staffCellLabel(r){
+  if(myProfile && myProfile.role==='admin' && adminStoreFilter==='all'){
+    return `<span style="color:var(--mu);font-weight:400">${r.storeName||''} ・</span> ${r.staff}`;
+  }
+  return r.staff;
 }
 
 // ── 検索（元の履歴画面） ──
@@ -895,7 +1136,7 @@ function getFiltered(){
   const fs=document.getElementById('f-staff').value;
   const fg=document.getElementById('f-guest').value.toLowerCase();
   const fm=document.getElementById('f-month').value;
-  return [...recs].reverse().filter(r=>{
+  return [...activeRecs()].reverse().filter(r=>{
     if(fs&&r.staff!==fs)return false;
     if(fg&&!r.guest.toLowerCase().includes(fg))return false;
     if(fm&&!r.date.startsWith(fm))return false;
@@ -912,14 +1153,14 @@ function renderRecords(){
   card.style.display='block';empty.style.display='none';stats.style.display='grid';
   body.innerHTML=list.map(r=>`<tr>
     <td class="tg">${r.date}</td>
-    <td style="font-weight:500">${r.staff}</td>
+    <td style="font-weight:500">${staffCellLabel(r)}</td>
     <td>${r.guest}</td>
     <td class="tm">${fmt(r.amount)}</td>
     <td>${r.dohan?`<span class="badge badge-g">${r.dohanCount}名</span>`:'<span style="color:var(--bd)">—</span>'}</td>
     <td class="ta">${fmt(r.back)}</td>
     <td style="white-space:nowrap">
       <button class="be" onclick="openEdit(${r.id})">修正</button>
-      <button class="bd2" onclick="askDel(${r.id})">削除</button>
+      ${canDelete()?`<button class="bd2" onclick="askDel(${r.id})">削除</button>`:''}
     </td></tr>`).join('');
   document.getElementById('rs-sales').innerHTML=fmt(list.reduce((s,r)=>s+r.amount,0))+'<span class="su">円</span>';
   document.getElementById('rs-back').innerHTML=fmt(list.reduce((s,r)=>s+r.back,0))+'<span class="su">円</span>';
@@ -932,7 +1173,8 @@ function askDel(id){
   document.body.style.overflow='hidden';
   document.getElementById('conf-ok').onclick=()=>{
     recs=recs.filter(r=>r.id!==delId);
-    save();cloudDelete(delId);closeConf();afterDataChange();toast('削除しました','var(--rd)');
+    cacheLocal();closeConf();afterDataChange();toast('削除しました','var(--rd)');
+    persistDelete(delId);
   };
 }
 function closeConf(){document.getElementById('conf-dlg').classList.remove('open');document.body.style.overflow='';}
@@ -972,7 +1214,8 @@ function saveEdit(){
   const dateVal=document.getElementById('m-date').value||recs[idx].date;
   const [yy,mm]=dateVal.split('-').map(Number);
   recs[idx]={...recs[idx],date:dateVal,staff:document.getElementById('m-staff').value.trim()||recs[idx].staff,guest:document.getElementById('m-guest').value.trim()||recs[idx].guest,amount:amt,rate:mRate,dohan:dh,dohanCount:dh?cnt:0,back:calcBack(amt,mRate,dh,cnt),year:yy,month:mm,updatedAt:new Date().toISOString()};
-  save();cloudUpsert(recs[idx]);closeEdit();afterDataChange();toast('✓ 修正しました','var(--ac)');
+  cacheLocal();closeEdit();afterDataChange();toast('✓ 修正しました','var(--ac)');
+  persistUpdate(recs[idx]);
 }
 document.getElementById('mrg').addEventListener('click',e=>{
   const b=e.target.closest('.rb');if(!b)return;
@@ -1021,8 +1264,8 @@ function importData(event){
       if(!newR.length){toast('新しいデータがありません','var(--ac)');}
       else{
         recs=[...recs,...newR].sort((a,b)=>a.date.localeCompare(b.date));
-        save();afterDataChange();
-        newR.forEach(r=>cloudUpsert(r));
+        cacheLocal();afterDataChange();
+        newR.forEach(r=>persistNew(r));
         toast('✓ '+newR.length+'件 読み込みました','var(--gn)');
       }
     }catch{toast('読み込みに失敗しました','var(--rd)');}
@@ -1071,7 +1314,7 @@ function setPeriod(btn,type){
 }
 function renderSRank(){
   const sort=document.getElementById('sr-sort').value;
-  const list=fp(recs,sP);
+  const list=fp(activeRecs(),sP);
   const map={};
   list.forEach(r=>{
     if(!map[r.staff])map[r.staff]={name:r.staff,back:0,sales:0,count:0,dTimes:0,dCount:0};
@@ -1103,14 +1346,14 @@ function renderSRank(){
   }).join('');
 }
 function refreshGF(){
-  const staffs=[...new Set(recs.map(r=>r.staff))];
+  const staffs=[...new Set(activeRecs().map(r=>r.staff))];
   const sel=document.getElementById('gr-staff'),cur=sel.value;
   sel.innerHTML='<option value="">全スタッフ</option>'+staffs.map(s=>`<option value="${s}"${s===cur?' selected':''}>${s}</option>`).join('');
 }
 function renderGRank(){
   const sort=document.getElementById('gr-sort').value;
   const fs=document.getElementById('gr-staff').value;
-  let list=fp(recs,gP);
+  let list=fp(activeRecs(),gP);
   if(fs)list=list.filter(r=>r.staff===fs);
   const map={};
   list.forEach(r=>{
@@ -1154,13 +1397,13 @@ function switchTab(btn){
 }
 function getMonthRecs(){
   const pf=anY+'-'+String(anM).padStart(2,'0');
-  return recs.filter(r=>r.date.startsWith(pf));
+  return activeRecs().filter(r=>r.date.startsWith(pf));
 }
 function renderAnalytics(){
   document.getElementById('an-lab').textContent=anY+'年'+anM+'月';
   const cur=getMonthRecs();
   let pm=anM-1,py=anY;if(pm<1){pm=12;py--;}
-  const prev=recs.filter(r=>r.date.startsWith(py+'-'+String(pm).padStart(2,'0')));
+  const prev=activeRecs().filter(r=>r.date.startsWith(py+'-'+String(pm).padStart(2,'0')));
   const tb=cur.reduce((s,r)=>s+r.back,0);
   const ts=cur.reduce((s,r)=>s+r.amount,0);
   const pb=prev.reduce((s,r)=>s+r.back,0);
@@ -1202,14 +1445,14 @@ function drawCombo(cur){
 function changeStatYear(d){ statY+=d; renderYearly(); }
 function renderYearly(){
   document.getElementById('yr-lab').textContent=statY+'年';
-  const list=recs.filter(r=>r.date.startsWith(String(statY)));
+  const list=activeRecs().filter(r=>r.date.startsWith(String(statY)));
   const totalBack=list.reduce((s,r)=>s+r.back,0);
   const totalSales=list.reduce((s,r)=>s+r.amount,0);
   const monthsWithData=new Set(list.map(r=>r.date.slice(5,7))).size;
   const avgBack=monthsWithData?Math.round(totalBack/monthsWithData):0;
   document.getElementById('yr-back').innerHTML=fmt(totalBack)+'<span style="font-size:13px;color:var(--mu);margin-left:4px">円</span>';
   document.getElementById('yr-sub').textContent=list.length+'件 ／ 売上合計 '+fmt(totalSales)+'円 ／ 月平均バック '+fmt(avgBack)+'円';
-  const prevList=recs.filter(r=>r.date.startsWith(String(statY-1)));
+  const prevList=activeRecs().filter(r=>r.date.startsWith(String(statY-1)));
   const prevBack=prevList.reduce((s,r)=>s+r.back,0);
   const mel=document.getElementById('yr-mom');
   if(!prevBack){mel.textContent='—';mel.style.color='var(--mu)';}
@@ -1217,7 +1460,7 @@ function renderYearly(){
   const monthTotals=[];
   for(let m=1;m<=12;m++){
     const pf=statY+'-'+pad2(m);
-    monthTotals.push(recs.filter(r=>r.date.startsWith(pf)).reduce((s,r)=>s+r.back,0));
+    monthTotals.push(activeRecs().filter(r=>r.date.startsWith(pf)).reduce((s,r)=>s+r.back,0));
   }
   drawYearlyChart(monthTotals);
   renderYearlyTable(statY);
@@ -1233,7 +1476,7 @@ function renderYearlyTable(y){
   const rows=[];
   for(let m=1;m<=12;m++){
     const pf=y+'-'+pad2(m);
-    const list=recs.filter(r=>r.date.startsWith(pf));
+    const list=activeRecs().filter(r=>r.date.startsWith(pf));
     if(!list.length)continue;
     rows.push({m,sales:list.reduce((s,r)=>s+r.amount,0),back:list.reduce((s,r)=>s+r.back,0),count:list.length,dohan:list.filter(r=>r.dohan).length});
   }
@@ -1256,7 +1499,7 @@ function switchRV(btn){
   if(rvTab==='guest-sales') renderGuestSales();
 }
 function initReview(){
-  const staffs=[...new Set(recs.map(r=>r.staff))].sort();
+  const staffs=[...new Set(activeRecs().map(r=>r.staff))].sort();
   document.getElementById('rv-staff-sel').innerHTML='<option value="__all__">全スタッフ比較</option>'+staffs.map(s=>`<option value="${s}">${s}</option>`).join('');
   document.getElementById('rv-g-staff').innerHTML='<option value="">全スタッフ</option>'+staffs.map(s=>`<option value="${s}">${s}</option>`).join('');
   document.getElementById('rv-gs-staff').innerHTML='<option value="">全スタッフ</option>'+staffs.map(s=>`<option value="${s}">${s}</option>`).join('');
@@ -1265,8 +1508,8 @@ function initReview(){
   if(rvTab==='guest-sales') renderGuestSales();
 }
 function getMonthList(){
-  if(!recs.length)return [];
-  const dates=recs.map(r=>r.date.slice(0,7)).sort();
+  if(!activeRecs().length)return [];
+  const dates=activeRecs().map(r=>r.date.slice(0,7)).sort();
   const start=dates[0],end=dates[dates.length-1];
   const months=[];
   let [y,m]=start.split('-').map(Number);
@@ -1288,10 +1531,10 @@ function renderStaffGrowth(){
   }
   if(sel==='__all__'){
     document.getElementById('rv-kpi').style.display='none';
-    const staffs=[...new Set(recs.map(r=>r.staff))];
+    const staffs=[...new Set(activeRecs().map(r=>r.staff))];
     const datasets=staffs.map((s,i)=>{
       const data=months.map(mo=>{
-        const sum=recs.filter(r=>r.staff===s&&r.date.startsWith(mo)).reduce((a,r)=>a+r.back,0);
+        const sum=activeRecs().filter(r=>r.staff===s&&r.date.startsWith(mo)).reduce((a,r)=>a+r.back,0);
         return sum||null;
       });
       return {label:s,data,borderColor:COLORS[i%COLORS.length],backgroundColor:COLORS[i%COLORS.length]+'22',borderWidth:2,pointRadius:4,pointHoverRadius:6,tension:0.3,spanGaps:true};
@@ -1299,7 +1542,7 @@ function renderStaffGrowth(){
     drawStaffChart(months,datasets);
     renderStaffTableAll(months,staffs);
   } else {
-    const staffRecs=recs.filter(r=>r.staff===sel);
+    const staffRecs=activeRecs().filter(r=>r.staff===sel);
     const monthData=months.map(mo=>({
       mo,
       back:staffRecs.filter(r=>r.date.startsWith(mo)).reduce((a,r)=>a+r.back,0),
@@ -1339,20 +1582,20 @@ function renderStaffTableSingle(monthData){
     </table></div>`;
 }
 function renderStaffTableAll(months,staffs){
-  const activeMonths=months.filter(mo=>recs.some(r=>r.date.startsWith(mo)));
+  const activeMonths=months.filter(mo=>activeRecs().some(r=>r.date.startsWith(mo)));
   document.getElementById('rv-staff-table').innerHTML=`
     <div class="tw">
     <table style="min-width:${100+staffs.length*90}px">
       <thead><tr><th>月</th>${staffs.map(s=>`<th style="text-align:right">${s}</th>`).join('')}</tr></thead>
       <tbody>${activeMonths.map(mo=>`<tr><td class="tg">${mo}</td>${staffs.map(s=>{
-        const v=recs.filter(r=>r.staff===s&&r.date.startsWith(mo)).reduce((a,r)=>a+r.back,0);
+        const v=activeRecs().filter(r=>r.staff===s&&r.date.startsWith(mo)).reduce((a,r)=>a+r.back,0);
         return `<td class="tm" style="text-align:right;color:${v>0?'var(--ac2)':'var(--bd)'}">${v>0?fmt(v):'—'}</td>`;
       }).join('')}</tr>`).join('')}</tbody>
     </table></div>`;
 }
 function renderGuestRepeat(){
   const fs=document.getElementById('rv-g-staff').value;
-  let list=fs?recs.filter(r=>r.staff===fs):recs;
+  let list=fs?activeRecs().filter(r=>r.staff===fs):activeRecs();
   const todayD=new Date();
   const map={};
   list.forEach(r=>{
@@ -1398,7 +1641,7 @@ function renderGuestRepeat(){
 function renderGuestSales(){
   const fs=document.getElementById('rv-gs-staff').value;
   const sort=document.getElementById('rv-gs-sort').value;
-  let list=fs?recs.filter(r=>r.staff===fs):recs;
+  let list=fs?activeRecs().filter(r=>r.staff===fs):activeRecs();
   const map={};
   list.forEach(r=>{
     if(!map[r.guest])map[r.guest]={name:r.guest,total:0,back:0,count:0,dates:[]};
@@ -1439,93 +1682,174 @@ function renderGuestSales(){
   }).join('');
 }
 
-// ── クラウド同期（Supabase・任意） ──
-const CLOUD_KEY='staff_back_cloud_cfg';
-let cloudCfg={url:'',anonKey:'',enabled:false};
-let sbClient=null;
-function loadCloudCfg(){ try{ cloudCfg=JSON.parse(localStorage.getItem(CLOUD_KEY))||cloudCfg; }catch{} }
-function initCloud(){
-  loadCloudCfg();
-  document.getElementById('cf-url').value=cloudCfg.url||'';
-  document.getElementById('cf-key').value=cloudCfg.anonKey||'';
-  document.getElementById('cf-enabled').checked=!!cloudCfg.enabled;
-  updateCloudStatus();
-  if(cloudCfg.enabled&&cloudCfg.url&&cloudCfg.anonKey&&window.supabase){
-    try{ sbClient=window.supabase.createClient(cloudCfg.url,cloudCfg.anonKey); cloudPullAndMerge(); }
-    catch(e){ console.warn('cloud init failed',e); }
-  }
+// ── データ列変換（recs のキャメルケース ⇔ Supabaseのスネークケース） ──
+function toRow(r){ return {id:r.id,store_id:r.storeId,store_name:r.storeName,date:r.date,staff:r.staff,guest:r.guest,amount:r.amount,rate:r.rate,dohan:r.dohan,dohan_count:r.dohanCount||0,back:r.back,year:r.year,month:r.month,created_at:r.createdAt,updated_at:r.updatedAt,created_by:r.createdBy}; }
+function fromRow(row){ return {id:row.id,storeId:row.store_id,storeName:row.store_name,date:row.date,staff:row.staff,guest:row.guest,amount:row.amount,rate:row.rate,dohan:row.dohan,dohanCount:row.dohan_count||0,back:row.back,year:row.year,month:row.month,createdAt:row.created_at,updatedAt:row.updated_at,createdBy:row.created_by}; }
+
+// ── 保存処理（Supabaseへ送信。失敗したら端末内に一時保存して後で自動送信） ──
+async function persistNew(rec){
+  try{ const {error}=await sb.from('records').insert(toRow(rec)); if(error)throw error; updateSyncStatus(); }
+  catch(e){ queueOp('upsert',rec); toast('⚠ オフラインのため一時保存しました（後で自動送信）','var(--ac)'); }
 }
-function saveCloudCfg(){
-  cloudCfg={
-    url:document.getElementById('cf-url').value.trim(),
-    anonKey:document.getElementById('cf-key').value.trim(),
-    enabled:document.getElementById('cf-enabled').checked
-  };
-  localStorage.setItem(CLOUD_KEY,JSON.stringify(cloudCfg));
-  sbClient=null;
-  if(cloudCfg.enabled&&cloudCfg.url&&cloudCfg.anonKey&&window.supabase){
+async function persistUpdate(rec){
+  try{ const {error}=await sb.from('records').upsert(toRow(rec)); if(error)throw error; updateSyncStatus(); }
+  catch(e){ queueOp('upsert',rec); toast('⚠ オフラインのため一時保存しました（後で自動送信）','var(--ac)'); }
+}
+async function persistDelete(id){
+  try{ const {error}=await sb.from('records').delete().eq('id',id); if(error)throw error; updateSyncStatus(); }
+  catch(e){ queueOp('delete',{id}); toast('⚠ オフラインのため削除予約しました（後で自動反映）','var(--ac)'); }
+}
+async function flushQueue(manual){
+  if(!pendingQueue.length){ if(manual)toast('保留中のデータはありません','var(--ac)'); return; }
+  const remaining=[];
+  for(const item of pendingQueue){
     try{
-      sbClient=window.supabase.createClient(cloudCfg.url,cloudCfg.anonKey);
-      toast('✓ クラウド設定を保存しました','var(--ac)');
-      cloudPullAndMerge();
-    }catch(e){ toast('接続に失敗しました。URLとキーを確認してください','var(--rd)'); }
-  } else if(cloudCfg.enabled){
-    toast('URLとキーの両方を入力してください','var(--rd)');
-  } else {
-    toast('✓ 設定を保存しました（端末内保存のみ）','var(--ac)');
+      if(item.op==='upsert'){ const {error}=await sb.from('records').upsert(toRow(item.payload)); if(error)throw error; }
+      else if(item.op==='delete'){ const {error}=await sb.from('records').delete().eq('id',item.payload.id); if(error)throw error; }
+    }catch(e){ remaining.push(item); }
   }
-  updateCloudStatus();
+  pendingQueue=remaining; saveQueue(); updateSyncStatus();
+  if(remaining.length===0 && pendingQueue!==null){ if(manual) toast('✓ 同期しました','var(--gn)'); }
 }
-function updateCloudStatus(){
-  const el=document.getElementById('cf-status');
-  if(!cloudCfg.enabled){ el.textContent='現在: 端末内保存のみ（クラウド同期オフ）'; return; }
-  el.textContent = sbClient ? '現在: クラウド同期オン ・ 接続中' : '現在: クラウド同期オン（保存すると接続します）';
+function updateSyncStatus(){
+  const dot=document.getElementById('sync-status');
+  const cf=document.getElementById('cf-status');
+  const label = pendingQueue.length ? `⚠ ${pendingQueue.length}件 送信待ち（自動で再送信します）` : (navigator.onLine ? '☁ クラウドと同期済み' : 'オフライン（保存済みデータを表示中）');
+  const dotClass = pendingQueue.length ? 'pending' : (navigator.onLine ? '' : 'off');
+  if(dot) dot.innerHTML = `<span class="sync-dot ${dotClass}"></span>${label}`;
+  if(cf) cf.textContent = label + (pendingQueue.length?'':'');
 }
-function toRow(r){ return {id:r.id,date:r.date,staff:r.staff,guest:r.guest,amount:r.amount,rate:r.rate,dohan:r.dohan,dohan_count:r.dohanCount||0,back:r.back,year:r.year,month:r.month,created_at:r.createdAt,updated_at:r.updatedAt}; }
-function fromRow(row){ return {id:row.id,date:row.date,staff:row.staff,guest:row.guest,amount:row.amount,rate:row.rate,dohan:row.dohan,dohanCount:row.dohan_count||0,back:row.back,year:row.year,month:row.month,createdAt:row.created_at,updatedAt:row.updated_at}; }
-async function cloudUpsert(r){
-  if(!cloudCfg.enabled||!sbClient)return;
-  try{ await sbClient.from('records').upsert(toRow(r)); }catch(e){ console.warn('cloud upsert failed',e); }
+
+// ── リアルタイム反映（他の店舗・他端末の入力を自動で受信） ──
+function subscribeRealtime(){
+  if(realtimeChannel) return;
+  realtimeChannel = sb.channel('records-db-changes')
+    .on('postgres_changes',{event:'*',schema:'public',table:'records'},payload=>{
+      if(payload.eventType==='DELETE'){
+        recs=recs.filter(r=>r.id!==payload.old.id);
+      } else {
+        const row=fromRow(payload.new);
+        const idx=recs.findIndex(r=>r.id===row.id);
+        if(idx>=0) recs[idx]=row; else recs.push(row);
+      }
+      cacheLocal();
+      afterDataChange();
+    })
+    .subscribe();
 }
-async function cloudDelete(id){
-  if(!cloudCfg.enabled||!sbClient)return;
-  try{ await sbClient.from('records').delete().eq('id',id); }catch(e){ console.warn('cloud delete failed',e); }
+window.addEventListener('online',()=>{ flushQueue(); updateSyncStatus(); });
+window.addEventListener('offline', updateSyncStatus);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ flushQueue(); loadRecordsFromCloud().then(()=>afterDataChange()); } });
+setInterval(flushQueue, 30000);
+
+// ── 既存データの一度きりの移行（旧バージョンの端末内データをSupabaseへ） ──
+async function migrateLegacyIfNeeded(){
+  if(!myProfile || myProfile.role!=='staff' || !myProfile.storeId) return;
+  const MIG_KEY='staff_back_migrated_v1';
+  if(localStorage.getItem(MIG_KEY)) return;
+  let legacy=[];
+  try{ legacy=JSON.parse(localStorage.getItem('staff_back_v2'))||[]; }catch{ legacy=[]; }
+  if(!legacy.length){ localStorage.setItem(MIG_KEY,'1'); return; }
+  const ok=confirm(`この端末に、以前の記録が${legacy.length}件残っています。\n「${myProfile.storeName}」のデータとしてクラウドに移行しますか？`);
+  localStorage.setItem(MIG_KEY,'1');
+  if(!ok) return;
+  const existingIds=new Set(recs.map(r=>r.id));
+  let count=0;
+  for(const raw of legacy){
+    if(existingIds.has(raw.id)) continue;
+    const rec=normalizeRecord(raw);
+    recs.push(rec);
+    await persistNew(rec);
+    count++;
+  }
+  cacheLocal(); afterDataChange();
+  if(count) toast(`✓ ${count}件の過去データを移行しました`,'var(--gn)');
 }
-async function cloudPullAndMerge(){
-  if(!cloudCfg.enabled||!sbClient)return;
+
+// ── データ読み込み（Supabaseが正・オフライン時はキャッシュ） ──
+async function loadRecordsFromCloud(){
   try{
-    const {data,error}=await sbClient.from('records').select('*');
-    if(error||!data)return;
-    const local=new Map(recs.map(r=>[r.id,r]));
-    let changed=false;
-    data.forEach(row=>{
-      const cr=fromRow(row);
-      const lr=local.get(cr.id);
-      if(!lr){ recs.push(cr); changed=true; }
-      else if(cr.updatedAt&&lr.updatedAt&&cr.updatedAt>lr.updatedAt){ Object.assign(lr,cr); changed=true; }
-    });
-    if(changed){ save(); afterDataChange(); toast('☁ クラウドと同期しました','var(--ac)'); }
-  }catch(e){ console.warn('cloud pull failed',e); }
+    const {data,error}=await sb.from('records').select('*');
+    if(error) throw error;
+    recs=(data||[]).map(fromRow);
+    cacheLocal();
+  }catch(e){
+    loadLocalCache();
+  }
+  migrateRecs();
+  updateDL();
+  updateSyncStatus();
 }
-async function cloudSyncNow(){
-  if(!cloudCfg.enabled){ toast('先にクラウド同期をオンにしてください','var(--rd)'); return; }
-  if(!sbClient){ toast('接続できていません。設定を確認してください','var(--rd)'); return; }
-  toast('同期中…','var(--ac)');
-  for(const r of recs){ await cloudUpsert(r); }
-  await cloudPullAndMerge();
-  toast('✓ 同期が完了しました','var(--gn)');
+
+// ── 認証 ──
+function openSettings(){
+  document.getElementById('settings-mo').classList.add('open'); document.body.style.overflow='hidden';
+  updateSyncStatus();
+  const acct=document.getElementById('acct-status');
+  if(acct && myProfile){ acct.textContent=(session?session.user.email:'')+'（'+(myProfile.role==='admin'?'管理者':myProfile.storeName)+'）'; }
 }
-function openSettings(){ document.getElementById('settings-mo').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeSettings(){ document.getElementById('settings-mo').classList.remove('open'); document.body.style.overflow=''; }
+async function doLogin(){
+  const email=document.getElementById('au-email').value.trim();
+  const pass=document.getElementById('au-pass').value;
+  const err=document.getElementById('au-err');
+  const btn=document.getElementById('au-btn');
+  err.classList.remove('show');
+  if(!email||!pass){ err.textContent='メールアドレスとパスワードを入力してください'; err.classList.add('show'); return; }
+  btn.disabled=true; btn.textContent='ログイン中…';
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  btn.disabled=false; btn.textContent='ログイン';
+  if(error){ err.textContent='メールアドレスかパスワードが違います'; err.classList.add('show'); }
+}
+async function doLogout(){
+  if(!confirm('ログアウトしますか？')) return;
+  closeSettings();
+  await sb.auth.signOut();
+  localStorage.removeItem(SK);
+  location.reload();
+}
+async function afterLogin(s){
+  session=s;
+  const {data:prof,error:profErr}=await sb.from('profiles').select('role,store_id,display_name').eq('id',s.user.id).single();
+  if(profErr || !prof){
+    document.getElementById('au-err').textContent='アカウントに店舗情報が設定されていません。管理者にご確認ください';
+    document.getElementById('au-err').classList.add('show');
+    await sb.auth.signOut();
+    return;
+  }
+  const {data:storeRows}=await sb.from('stores').select('*').order('name');
+  stores=(storeRows||[]).map(s=>({id:s.id,name:s.name}));
+  myProfile={ role:prof.role, storeId:prof.store_id, storeName: prof.store_id ? storeNameById(prof.store_id) : '', displayName:prof.display_name };
+
+  document.getElementById('auth-gate').style.display='none';
+  document.getElementById('app-root').style.display='block';
+
+  const chip=document.getElementById('store-chip');
+  if(myProfile.role==='admin'){ chip.style.display='inline-block'; chip.textContent='管理者'; }
+  else { chip.style.display='inline-block'; chip.textContent=myProfile.storeName; }
+
+  document.getElementById('bn-home-icon').textContent = myProfile.role==='admin' ? '🏪' : '🏠';
+  document.getElementById('bn-home-label').textContent = myProfile.role==='admin' ? '管理' : 'ホーム';
+
+  loadQueue();
+  await loadRecordsFromCloud();
+  populateStoreFilters();
+  populateEntryStoreSelect();
+  await migrateLegacyIfNeeded();
+  showPage('home');
+  subscribeRealtime();
+  flushQueue();
+}
 
 // ── 初期化 ──
-load();
-migrateRecs();
-save();
-updateDL();
-loadCloudCfg();
-showPage('home');
-initCloud();
+(async function initApp(){
+  const {data:{session:s}}=await sb.auth.getSession();
+  if(s){ await afterLogin(s); }
+  sb.auth.onAuthStateChange((event,newSession)=>{
+    if(event==='SIGNED_IN' && (!session || session.user.id!==newSession.user.id)){ afterLogin(newSession); }
+    if(event==='SIGNED_OUT'){ location.reload(); }
+  });
+})();
 
 // ── PWA Service Worker ──
 if('serviceWorker' in navigator){
