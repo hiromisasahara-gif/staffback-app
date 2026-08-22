@@ -1,0 +1,1566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>キープボトル管理</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ボトル管理">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="color-scheme" content="dark">
+<meta name="format-detection" content="telephone=no">
+<meta name="description" content="お客様のキープボトルと来店・保管期限・廃棄履歴を管理するアプリ">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#0a0a0f;--sf:#13131c;--sf2:#1a1a26;--bd:#272738;--ac:#c8a96e;--ac2:#e8c98e;--acd:rgba(200,169,110,.15);--tx:#e8e8f0;--mu:#6a6a8a;--sb:#9a9ab8;--gn:#5ecb8a;--rd:#e06c75;--bl:#7eb8f7;--gl:#f5d76e;--sl:#c0c0d0;--bz:#cd7f50;--or:#f0a058;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{overflow-x:hidden;width:100%;}
+body{background:var(--bg);color:var(--tx);font-family:'Noto Sans JP',sans-serif;min-height:100vh;min-height:100dvh;}
+button,input,select,textarea{font-family:inherit;}
+
+/* ── TOP BAR ── */
+.topbar{position:sticky;top:0;z-index:100;background:rgba(10,10,15,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;}
+.topbar .back{background:none;border:none;color:var(--sb);font-size:22px;cursor:pointer;padding:6px;line-height:1;min-width:40px;min-height:40px;display:none;}
+.topbar .back.show{display:block;}
+.topbar .brand{font-size:14px;font-weight:700;color:var(--ac);letter-spacing:.08em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.topbar .staffpill{font-size:11px;color:var(--sb);background:var(--sf2);border:1px solid var(--bd);border-radius:20px;padding:6px 12px;white-space:nowrap;}
+
+.screen{display:none;padding:16px 16px calc(96px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto;}
+.screen.active{display:block;}
+.full{max-width:none;}
+
+/* ── SEARCH ── */
+.search-wrap{position:relative;margin-bottom:18px;}
+.search-input{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:16px;padding:18px 20px;color:var(--tx);font-size:19px;font-weight:500;min-height:60px;outline:none;transition:border-color .2s;}
+.search-input:focus{border-color:var(--ac);}
+.search-input::placeholder{color:var(--mu);}
+.search-clear{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:var(--sf2);border:none;color:var(--sb);width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:none;}
+.search-clear.show{display:block;}
+
+.result-card{background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:18px;margin-bottom:12px;cursor:pointer;transition:border-color .15s;}
+.result-card:active{border-color:var(--ac);}
+.result-name{font-size:22px;font-weight:900;letter-spacing:.02em;margin-bottom:2px;}
+.result-sub{font-size:12px;color:var(--mu);margin-bottom:12px;}
+.result-bottles{display:flex;flex-wrap:wrap;gap:10px;}
+.bottle-chip{background:var(--sf2);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;align-items:flex-start;min-width:96px;}
+.bottle-chip .bc-brand{font-size:15px;font-weight:700;color:var(--tx);}
+.bottle-chip .bc-num{font-family:'DM Mono',monospace;font-size:26px;font-weight:700;color:var(--ac2);letter-spacing:.02em;}
+.bottle-chip.disposed{opacity:.45;}
+.bottle-chip.expired{border-color:rgba(224,108,117,.5);}
+.bottle-chip.expiring_soon{border-color:rgba(240,160,88,.5);}
+.no-bottle{font-size:12px;color:var(--mu);}
+.empty-hint{text-align:center;color:var(--mu);font-size:14px;padding:40px 20px;}
+
+/* ── DASHBOARD CARDS ── */
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px;}
+.dash-card{background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:18px;cursor:pointer;transition:border-color .15s;}
+.dash-card:active{border-color:var(--ac);}
+.dash-card .dl{font-size:11px;letter-spacing:.1em;color:var(--mu);margin-bottom:8px;}
+.dash-card .dv{font-family:'DM Mono',monospace;font-size:30px;font-weight:700;color:var(--ac2);}
+.dash-card .dv .du{font-size:13px;color:var(--mu);margin-left:4px;}
+.dash-card.warn .dv{color:var(--or);}
+.dash-card.danger .dv{color:var(--rd);}
+.dash-card.full{grid-column:1/-1;}
+
+/* ── CARDS / FORM ── */
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:20px;margin-bottom:14px;}
+.ct{font-size:11px;letter-spacing:.2em;color:var(--ac);text-transform:uppercase;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;}
+.ph{margin-bottom:18px;}
+.ph .ey{font-size:10px;letter-spacing:.3em;color:var(--ac);text-transform:uppercase;margin-bottom:5px;}
+.ph h2{font-size:21px;font-weight:700;}
+.field{margin-bottom:14px;}
+.field:last-child{margin-bottom:0;}
+.field label{display:block;font-size:12px;color:var(--mu);margin-bottom:6px;letter-spacing:.06em;}
+.field label .req{color:var(--rd);margin-left:3px;}
+input[type=text],input[type=number],input[type=date],input[type=tel],select,textarea{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:13px 14px;color:var(--tx);font-family:'Noto Sans JP',sans-serif;font-size:16px;min-height:48px;outline:none;transition:border-color .2s;-webkit-appearance:none;appearance:none;}
+select{color-scheme:dark;}
+input[type=date]{color-scheme:dark;}
+textarea{min-height:88px;resize:vertical;}
+input:focus,select:focus,textarea:focus{border-color:var(--ac);}
+input::placeholder,textarea::placeholder{color:var(--bd);}
+.hint{font-size:12px;color:var(--mu);margin-top:6px;}
+.hint.warn{color:var(--or);}
+.hint.err{color:var(--rd);}
+
+.btn-p{width:100%;background:var(--ac);border:none;border-radius:14px;padding:18px;min-height:58px;color:#0a0a0f;font-family:'Noto Sans JP',sans-serif;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.06em;transition:all .2s;}
+.btn-p:active{background:var(--ac2);}
+.btn-p:disabled{opacity:.4;}
+.btn-visit{width:100%;background:var(--gn);border:none;border-radius:16px;padding:22px;min-height:68px;color:#0a0a0f;font-size:19px;font-weight:900;cursor:pointer;letter-spacing:.1em;margin:6px 0 16px;}
+.btn-visit:active{filter:brightness(1.1);}
+.btn-danger{width:100%;background:var(--rd);border:none;border-radius:14px;padding:18px;min-height:58px;color:#1a0a0a;font-size:16px;font-weight:700;cursor:pointer;}
+.btn-danger:active{filter:brightness(1.1);}
+.btn-s{width:100%;background:none;border:1px solid var(--bd);border-radius:12px;padding:14px;min-height:50px;color:var(--sb);font-size:14px;cursor:pointer;transition:all .2s;}
+.btn-s:active{border-color:var(--ac);color:var(--ac);}
+.btn-row{display:flex;gap:10px;}
+.btn-row>*{flex:1;}
+.be{background:none;border:1px solid rgba(200,169,110,.35);border-radius:9px;padding:9px 14px;min-height:38px;color:var(--ac);font-size:12px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;}
+.be:active{background:var(--acd);}
+.bd2{background:none;border:1px solid rgba(224,108,117,.35);border-radius:9px;padding:9px 14px;min-height:38px;color:var(--rd);font-size:12px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;}
+.bd2:active{background:rgba(224,108,117,.1);}
+
+/* ── BADGE / STATUS ── */
+.badge{display:inline-flex;align-items:center;gap:4px;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;letter-spacing:.03em;}
+.badge-keeping{background:rgba(94,203,138,.13);color:var(--gn);border:1px solid rgba(94,203,138,.3);}
+.badge-expiring_soon{background:rgba(240,160,88,.13);color:var(--or);border:1px solid rgba(240,160,88,.3);}
+.badge-expired{background:rgba(224,108,117,.13);color:var(--rd);border:1px solid rgba(224,108,117,.3);}
+.badge-disposed{background:rgba(106,106,138,.13);color:var(--mu);border:1px solid rgba(106,106,138,.3);}
+
+/* ── BOTTLE ROW (big number) ── */
+.bottle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--sf2);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:10px;cursor:pointer;}
+.bottle-row:active{border-color:var(--ac);}
+.bottle-row .bl{flex:1;min-width:0;}
+.bottle-row .bl .bn-brand{font-size:16px;font-weight:700;margin-bottom:4px;}
+.bottle-row .bl .bn-num{font-family:'DM Mono',monospace;font-size:30px;font-weight:900;color:var(--ac2);}
+.bottle-row .br{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px;}
+.bottle-row .exp{font-size:11px;color:var(--mu);}
+
+/* ── LIST ROW ── */
+.li-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(39,39,56,.6);gap:10px;}
+.li-row:last-child{border-bottom:none;}
+.li-row .ll{min-width:0;flex:1;}
+.li-row .ln{font-size:15px;font-weight:600;}
+.li-row .ls{font-size:12px;color:var(--mu);margin-top:2px;}
+
+/* ── FILTER BAR ── */
+.fbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+.fsel,.finp{background:var(--sf2);border:1px solid var(--bd);border-radius:9px;padding:10px 12px;min-height:42px;color:var(--tx);font-size:13px;outline:none;}
+.fsel:focus,.finp:focus{border-color:var(--ac);}
+.finp{flex:1;min-width:120px;}
+.chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.chip{background:var(--sf2);border:1px solid var(--bd);border-radius:20px;padding:9px 16px;font-size:13px;color:var(--sb);cursor:pointer;}
+.chip.active{background:var(--ac);border-color:var(--ac);color:#0a0a0f;font-weight:700;}
+
+/* ── TABLE (admin) ── */
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;font-size:12px;min-width:560px;}
+th{text-align:left;padding:10px 8px;font-size:10px;letter-spacing:.08em;color:var(--mu);text-transform:uppercase;border-bottom:1px solid var(--bd);font-weight:400;}
+td{padding:11px 8px;border-bottom:1px solid rgba(39,39,56,.5);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+.tm{font-family:'DM Mono',monospace;}
+
+/* ── TOAST ── */
+.toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:var(--gn);color:#0a0a0f;padding:14px 22px;border-radius:12px;font-size:14px;font-weight:700;opacity:0;pointer-events:none;transition:all .25s;z-index:400;max-width:88%;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.4);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* ── MODAL ── */
+.overlay{position:fixed;inset:0;background:rgba(6,6,10,.72);z-index:500;display:none;align-items:flex-end;justify-content:center;padding:0;}
+.overlay.show{display:flex;}
+.sheet{background:var(--sf);border-radius:20px 20px 0 0;padding:24px 20px calc(24px + env(safe-area-inset-bottom));width:100%;max-width:640px;max-height:88vh;overflow-y:auto;border-top:1px solid var(--bd);animation:slideup .2s ease-out;}
+@keyframes slideup{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+.sheet h3{font-size:18px;font-weight:700;margin-bottom:16px;}
+.sheet .close{position:absolute;}
+.kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(39,39,56,.6);font-size:14px;}
+.kv:last-of-type{border-bottom:none;}
+.kv .kk{color:var(--mu);}
+.kv .kvv{font-weight:600;text-align:right;}
+
+/* ── STAFF PICKER ── */
+.staff-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:18px 0;}
+.staff-btn{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:20px 10px;font-size:17px;font-weight:700;color:var(--tx);cursor:pointer;text-align:center;min-height:64px;}
+.staff-btn:active{border-color:var(--ac);color:var(--ac);}
+
+/* ── LOGIN ── */
+.login-wrap{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;padding:24px;max-width:420px;margin:0 auto;}
+.login-logo{text-align:center;margin-bottom:36px;}
+.login-logo .lg1{font-size:12px;letter-spacing:.4em;color:var(--ac);margin-bottom:8px;}
+.login-logo .lg2{font-size:26px;font-weight:900;}
+.login-err{color:var(--rd);font-size:13px;text-align:center;margin-top:10px;min-height:18px;}
+
+/* ── BOTTOM NAV ── */
+nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,28,.97);backdrop-filter:blur(12px);border-top:1px solid var(--bd);display:flex;padding:6px 4px calc(6px + env(safe-area-inset-bottom));}
+.bn-btn{flex:1;background:none;border:none;color:var(--mu);font-size:10px;padding:8px 2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;min-height:52px;}
+.bn-btn .bi{font-size:21px;}
+.bn-btn.active{color:var(--ac);}
+
+.section-title{font-size:13px;font-weight:700;color:var(--sb);margin:20px 0 10px;letter-spacing:.04em;}
+.section-title:first-child{margin-top:0;}
+.tabbar{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;}
+.tabbar .tb{background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:10px 16px;font-size:13px;color:var(--sb);white-space:nowrap;cursor:pointer;}
+.tabbar .tb.active{background:var(--ac);border-color:var(--ac);color:#0a0a0f;font-weight:700;}
+.hidden{display:none !important;}
+.spinner{border:3px solid var(--bd);border-top-color:var(--ac);border-radius:50%;width:28px;height:28px;animation:spin .7s linear infinite;margin:30px auto;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.center-msg{text-align:center;color:var(--mu);font-size:14px;padding:30px 0;}
+</style>
+</head>
+<body>
+
+<!-- ══════════ ログイン画面 ══════════ -->
+<div id="screen-login" class="screen active full" style="padding:0;">
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="lg1">KEEP BOTTLE</div>
+      <div class="lg2">キープボトル管理</div>
+    </div>
+    <div class="field">
+      <label>メールアドレス</label>
+      <input type="text" id="login-email" autocomplete="username" placeholder="store@example.com">
+    </div>
+    <div class="field">
+      <label>パスワード</label>
+      <input type="text" id="login-pass" autocomplete="current-password" placeholder="パスワード" style="-webkit-text-security:disc;text-security:disc;">
+    </div>
+    <button class="btn-p" id="login-btn" onclick="doLogin()" style="margin-top:6px;">ログイン</button>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- ══════════ スタッフ選択画面 ══════════ -->
+<div id="screen-staffpick" class="screen full" style="padding:0;">
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="lg1">STAFF</div>
+      <div class="lg2">あなたのお名前は？</div>
+    </div>
+    <div class="hint" style="text-align:center;margin-bottom:6px;">来店登録・廃棄記録などに使われます</div>
+    <div class="staff-grid" id="staffpick-grid"></div>
+    <div class="field" style="margin-top:6px;">
+      <label>名簿にない場合は追加できます</label>
+      <div class="btn-row">
+        <input type="text" id="staffpick-newname" placeholder="スタッフ名">
+        <button class="be" style="min-width:80px;" onclick="addStaffAndPick()">追加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ アプリ本体 ══════════ -->
+<div id="app-root" style="display:none;">
+  <div class="topbar">
+    <button class="back" id="topbar-back" onclick="goBack()">←</button>
+    <div class="brand" id="topbar-title">キープボトル管理</div>
+    <div class="staffpill" id="topbar-staff"></div>
+  </div>
+
+  <!-- ホーム -->
+  <div id="screen-home" class="screen"></div>
+  <!-- 期限管理 -->
+  <div id="screen-expiry" class="screen"></div>
+  <!-- 空き番号 -->
+  <div id="screen-numbers" class="screen"></div>
+  <!-- メニュー -->
+  <div id="screen-menu" class="screen"></div>
+  <!-- お客様詳細 -->
+  <div id="screen-customer" class="screen"></div>
+  <!-- お客様登録・編集 -->
+  <div id="screen-customer-form" class="screen"></div>
+  <!-- ボトル登録・編集 -->
+  <div id="screen-bottle-form" class="screen"></div>
+  <!-- 銘柄管理 -->
+  <div id="screen-brands" class="screen"></div>
+  <!-- スタッフ名簿 -->
+  <div id="screen-staff" class="screen"></div>
+  <!-- 廃棄履歴 -->
+  <div id="screen-disposals" class="screen"></div>
+  <!-- 操作履歴 -->
+  <div id="screen-audit" class="screen"></div>
+  <!-- 店舗管理 -->
+  <div id="screen-stores" class="screen"></div>
+  <!-- CSV出力 -->
+  <div id="screen-csv" class="screen"></div>
+  <!-- データ管理(完全削除・管理者) -->
+  <div id="screen-datamanage" class="screen"></div>
+
+  <nav class="bn">
+    <button class="bn-btn active" data-nav="home" onclick="navTo('home')"><div class="bi">🏠</div>ホーム</button>
+    <button class="bn-btn" data-nav="expiry" onclick="navTo('expiry')"><div class="bi">⏰</div>期限管理</button>
+    <button class="bn-btn" data-nav="numbers" onclick="navTo('numbers')"><div class="bi">🔢</div>空き番号</button>
+    <button class="bn-btn" data-nav="menu" onclick="navTo('menu')"><div class="bi">☰</div>メニュー</button>
+  </nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 廃棄確認シート -->
+<div class="overlay" id="dispose-overlay">
+  <div class="sheet">
+    <h3>この内容で廃棄しますか？</h3>
+    <div id="dispose-body"></div>
+  </div>
+</div>
+
+<!-- 同姓同名警告シート -->
+<div class="overlay" id="dup-overlay">
+  <div class="sheet">
+    <h3>同じ名前のお客様が登録されています</h3>
+    <div id="dup-body"></div>
+  </div>
+</div>
+
+<!-- 同日来店確認シート -->
+<div class="overlay" id="visit-overlay">
+  <div class="sheet">
+    <h3>本日はすでに来店登録されています</h3>
+    <div id="visit-body"></div>
+  </div>
+</div>
+
+<!-- 汎用確認シート -->
+<div class="overlay" id="confirm-overlay">
+  <div class="sheet">
+    <h3 id="confirm-title">確認</h3>
+    <div id="confirm-body"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   設定・状態
+============================================================ */
+const SUPABASE_URL='https://gbjqyjfocjohppivfjns.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_64o_B0D_sjfh6vxm8PWtDg_6H_QRbTH';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+const STAFF_KEY='kb_staff_v1';
+
+let session=null, myProfile=null, currentStaff=null;
+let allStores=[], scopeStoreIds=[];
+let staffMembers=[], brands=[], customers=[], bottles=[];
+let adminStoreFilter='all';
+let navStack=[]; // {screen, params}
+let curScreen=null, curParams=null;
+let realtimeChannel=null;
+let disposeCtx=null, visitCtx=null;
+
+/* ============================================================
+   ユーティリティ
+============================================================ */
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(msg,color){
+  const t=$('toast');
+  t.textContent=msg;
+  t.style.background=color||'var(--gn)';
+  t.style.color=(color==='var(--rd)')?'#fff':'#0a0a0f';
+  t.classList.add('show');
+  clearTimeout(t._tm);
+  t._tm=setTimeout(()=>t.classList.remove('show'),2600);
+}
+function jstTodayStr(){
+  return new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date()); // yyyy-mm-dd
+}
+function fmtDate(d){
+  if(!d) return '';
+  const dt = (d instanceof Date) ? d : new Date(d.length<=10 ? d+'T00:00:00+09:00' : d);
+  if(isNaN(dt)) return '';
+  return new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(dt).replace(/\//g,'/');
+}
+function fmtDateTime(d){
+  if(!d) return '';
+  const dt = new Date(d);
+  if(isNaN(dt)) return '';
+  const f = new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+  const parts = f.formatToParts(dt).reduce((o,p)=>{o[p.type]=p.value;return o;},{});
+  return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
+}
+function addMonths(dateStr,n){
+  const d = new Date(dateStr+'T00:00:00+09:00');
+  d.setMonth(d.getMonth()+n);
+  return new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(d);
+}
+function statusLabel(s){
+  return {keeping:'保管中',expiring_soon:'保管期限間近',expired:'保管期限切れ',disposed:'廃棄済み'}[s]||s;
+}
+function reasonLabel(r){
+  return {expired:'保管期限切れ',empty:'飲み切り・空',other:'その他'}[r]||r;
+}
+function badgeHtml(status){
+  return `<span class="badge badge-${status}">${statusLabel(status)}</span>`;
+}
+function storeName(id){
+  const s=allStores.find(x=>x.id===id);
+  return s?s.name:'';
+}
+function isAdmin(){ return myProfile && myProfile.role==='admin'; }
+
+/* ============================================================
+   起動
+============================================================ */
+window.addEventListener('DOMContentLoaded', init);
+async function init(){
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  }
+  const {data:{session:s}} = await sb.auth.getSession();
+  if(s){ session=s; await afterLogin(); }
+}
+
+async function doLogin(){
+  const email=$('login-email').value.trim();
+  const pass=$('login-pass').value;
+  $('login-err').textContent='';
+  if(!email||!pass){ $('login-err').textContent='メールアドレスとパスワードを入力してください'; return; }
+  $('login-btn').disabled=true; $('login-btn').textContent='ログイン中…';
+  const {data,error} = await sb.auth.signInWithPassword({email,password:pass});
+  $('login-btn').disabled=false; $('login-btn').textContent='ログイン';
+  if(error){ $('login-err').textContent='ログインできませんでした。メールアドレス・パスワードをご確認ください。'; return; }
+  session=data.session;
+  await afterLogin();
+}
+
+async function afterLogin(){
+  const {data:prof,error} = await sb.from('profiles').select('*').eq('id',session.user.id).single();
+  if(error||!prof){
+    $('login-err').textContent='アカウント情報が見つかりません。管理者にお問い合わせください。';
+    await sb.auth.signOut();
+    session=null;
+    return;
+  }
+  myProfile=prof;
+
+  const {data:storesData} = await sb.from('stores').select('*').order('name');
+  allStores = storesData||[];
+  scopeStoreIds = isAdmin() ? allStores.map(s=>s.id) : [myProfile.store_id];
+
+  $('screen-login').classList.remove('active');
+
+  if(isAdmin()){
+    currentStaff = {id:null, name:'管理者'};
+    await enterApp();
+  } else {
+    const saved = sessionStorage.getItem(STAFF_KEY);
+    if(saved){
+      try{ currentStaff = JSON.parse(saved); }catch(e){ currentStaff=null; }
+    }
+    if(currentStaff && currentStaff.id){
+      await enterApp();
+    } else {
+      await showStaffPick();
+    }
+  }
+}
+
+async function showStaffPick(){
+  $('screen-staffpick').classList.add('active');
+  const {data} = await sb.from('staff_members').select('*').eq('store_id',myProfile.store_id).eq('active',true).order('name');
+  staffMembers = data||[];
+  const grid=$('staffpick-grid');
+  grid.innerHTML = staffMembers.length
+    ? staffMembers.map(m=>`<button class="staff-btn" onclick="pickStaff('${m.id}','${esc(m.name).replace(/'/g,"\\'")}')">${esc(m.name)}</button>`).join('')
+    : `<div class="center-msg" style="grid-column:1/-1;">まだスタッフが登録されていません。下から追加してください。</div>`;
+}
+async function pickStaff(id,name){
+  currentStaff = {id,name};
+  sessionStorage.setItem(STAFF_KEY, JSON.stringify(currentStaff));
+  $('screen-staffpick').classList.remove('active');
+  await enterApp();
+}
+async function addStaffAndPick(){
+  const name=$('staffpick-newname').value.trim();
+  if(!name){ toast('スタッフ名を入力してください','var(--rd)'); return; }
+  const {data,error} = await sb.from('staff_members').insert({store_id:myProfile.store_id,name,created_by:session.user.id}).select().single();
+  if(error){ toast('追加できませんでした','var(--rd)'); return; }
+  await pickStaff(data.id,data.name);
+}
+function switchStaff(){
+  sessionStorage.removeItem(STAFF_KEY);
+  currentStaff=null;
+  $('app-root').style.display='none';
+  showStaffPick();
+}
+
+async function enterApp(){
+  $('screen-staffpick').classList.remove('active');
+  $('app-root').style.display='block';
+  $('topbar-staff').textContent = (isAdmin()?'管理者':storeName(myProfile.store_id))+' / '+(currentStaff?currentStaff.name:'');
+  await loadScopeData();
+  subscribeRealtime();
+  navStack=[];
+  navTo('home');
+}
+
+async function logout(){
+  await sb.auth.signOut();
+  sessionStorage.removeItem(STAFF_KEY);
+  session=null; myProfile=null; currentStaff=null;
+  if(realtimeChannel){ sb.removeChannel(realtimeChannel); realtimeChannel=null; }
+  $('app-root').style.display='none';
+  document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
+  $('screen-login').classList.add('active');
+  $('login-email').value=''; $('login-pass').value='';
+  toast('ログアウトしました','var(--sb)');
+}
+
+/* ============================================================
+   データ読み込み（店舗スコープ全体をキャッシュしてリアルタイム検索）
+============================================================ */
+function activeScopeIds(){
+  if(isAdmin() && adminStoreFilter!=='all') return [adminStoreFilter];
+  return scopeStoreIds;
+}
+async function loadScopeData(){
+  const ids = isAdmin() ? scopeStoreIds : scopeStoreIds; // admin: 全店舗キャッシュ、表示時にフィルタ
+  const [staffRes, brandRes, custRes, bottleRes] = await Promise.all([
+    sb.from('staff_members').select('*').in('store_id',ids).order('name'),
+    sb.from('bottle_brands').select('*').in('store_id',ids).is('deleted_at',null).order('sort_order'),
+    sb.from('customers').select('*').in('store_id',ids).is('deleted_at',null).order('name'),
+    sb.from('v_bottles').select('*').in('store_id',ids)
+  ]);
+  staffMembers = staffRes.data||[];
+  brands = brandRes.data||[];
+  customers = custRes.data||[];
+  bottles = bottleRes.data||[];
+}
+
+function subscribeRealtime(){
+  if(realtimeChannel){ sb.removeChannel(realtimeChannel); }
+  realtimeChannel = sb.channel('kb-realtime')
+    .on('postgres_changes',{event:'*',schema:'public',table:'customers'},handleCustomerRT)
+    .on('postgres_changes',{event:'*',schema:'public',table:'bottles'},()=>reloadBottlesQuiet())
+    .on('postgres_changes',{event:'*',schema:'public',table:'bottle_brands'},()=>reloadBrandsQuiet())
+    .on('postgres_changes',{event:'*',schema:'public',table:'staff_members'},()=>reloadStaffQuiet())
+    .subscribe();
+}
+function handleCustomerRT(payload){
+  if(payload.eventType==='DELETE'){
+    customers = customers.filter(c=>c.id!==payload.old.id);
+  } else {
+    const row=payload.new;
+    if(row.deleted_at){ customers=customers.filter(c=>c.id!==row.id); }
+    else {
+      const idx=customers.findIndex(c=>c.id===row.id);
+      if(idx>=0) customers[idx]=row; else customers.push(row);
+    }
+  }
+  if(curScreen==='home') renderHome();
+}
+async function reloadBottlesQuiet(){
+  const {data} = await sb.from('v_bottles').select('*').in('store_id',scopeStoreIds);
+  bottles = data||bottles;
+  if(curScreen==='home') renderHome();
+  if(curScreen==='expiry') renderExpiry();
+  if(curScreen==='customer') renderCustomerDetail(curParams);
+}
+async function reloadBrandsQuiet(){
+  const {data} = await sb.from('bottle_brands').select('*').in('store_id',scopeStoreIds).is('deleted_at',null).order('sort_order');
+  brands = data||brands;
+}
+async function reloadStaffQuiet(){
+  const {data} = await sb.from('staff_members').select('*').in('store_id',scopeStoreIds).order('name');
+  staffMembers = data||staffMembers;
+}
+
+/* ============================================================
+   画面ナビゲーション
+============================================================ */
+const NAV_TITLES={home:'キープボトル管理',expiry:'保管期限管理',numbers:'空き番号確認',menu:'メニュー',
+  customer:'お客様詳細','customer-form':'お客様登録・編集','bottle-form':'ボトル登録・編集',
+  brands:'銘柄管理',staff:'スタッフ名簿',disposals:'廃棄履歴',audit:'操作履歴',stores:'店舗管理',csv:'CSV出力',datamanage:'データ管理'};
+
+function navTo(screen,params){
+  if(curScreen) navStack.push({screen:curScreen,params:curParams});
+  showScreen(screen,params);
+}
+function goBack(){
+  const prev=navStack.pop();
+  if(prev) showScreen(prev.screen,prev.params);
+  else showScreen('home');
+}
+function showScreen(screen,params){
+  curScreen=screen; curParams=params;
+  document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
+  $('screen-'+screen).classList.add('active');
+  $('topbar-title').textContent = NAV_TITLES[screen]||'キープボトル管理';
+  $('topbar-back').classList.toggle('show', navStack.length>0);
+  document.querySelectorAll('.bn-btn').forEach(b=>b.classList.toggle('active', b.dataset.nav===screen));
+  window.scrollTo(0,0);
+  const renderers={home:renderHome,expiry:()=>renderExpiry(params),numbers:renderNumbers,menu:renderMenu,
+    customer:()=>renderCustomerDetail(params),'customer-form':()=>renderCustomerForm(params),
+    'bottle-form':()=>renderBottleForm(params),brands:renderBrands,staff:renderStaffAdmin,
+    disposals:renderDisposals,audit:renderAudit,stores:renderStores,csv:renderCsv,datamanage:renderDataManage};
+  (renderers[screen]||function(){})();
+}
+
+/* ============================================================
+   ホーム（検索＋ダッシュボード）
+============================================================ */
+function renderHome(){
+  const root=$('screen-home');
+  root.innerHTML = `
+    <div class="search-wrap">
+      <input type="text" class="search-input" id="search-box" placeholder="🔍 お客様名・銘柄・番号で検索" oninput="onSearchInput()" value="${esc(root._q||'')}">
+      <button class="search-clear ${root._q?'show':''}" onclick="clearSearch()">✕</button>
+    </div>
+    ${adminScopeBarHtml()}
+    <div id="home-body"></div>
+  `;
+  if(root._q){ $('search-box').focus(); renderSearchResults(root._q); }
+  else renderDashboard();
+}
+function adminScopeBarHtml(){
+  if(!isAdmin()) return '';
+  return `<div class="chip-row">
+    <div class="chip ${adminStoreFilter==='all'?'active':''}" onclick="setAdminScope('all')">全店舗</div>
+    ${allStores.map(s=>`<div class="chip ${adminStoreFilter===s.id?'active':''}" onclick="setAdminScope('${s.id}')">${esc(s.name)}</div>`).join('')}
+  </div>`;
+}
+function setAdminScope(id){
+  adminStoreFilter=id;
+  showScreen(curScreen,curParams);
+}
+// 銘柄管理・空き番号・スタッフ名簿は「1店舗」を前提にした画面のため、
+// 管理者が「全店舗」を選んでいる場合は自動的に最初の店舗に絞り込みます
+function resolvedAdminStoreId(){
+  if(isAdmin() && adminStoreFilter==='all'){ adminStoreFilter = allStores[0]?allStores[0].id:'all'; }
+  return isAdmin() ? adminStoreFilter : myProfile.store_id;
+}
+function onSearchInput(){
+  const q=$('search-box').value;
+  $('screen-home')._q=q;
+  document.querySelector('.search-clear').classList.toggle('show', !!q);
+  if(!q){ renderDashboard(); return; }
+  renderSearchResults(q);
+}
+function clearSearch(){
+  $('screen-home')._q='';
+  $('search-box').value='';
+  document.querySelector('.search-clear').classList.remove('show');
+  renderDashboard();
+}
+function scopedCustomers(){
+  const ids=activeScopeIds();
+  return customers.filter(c=>ids.includes(c.store_id));
+}
+function scopedBottles(){
+  const ids=activeScopeIds();
+  return bottles.filter(b=>ids.includes(b.store_id));
+}
+function renderSearchResults(q){
+  const query=q.trim().toLowerCase();
+  const custs=scopedCustomers();
+  const bts=scopedBottles();
+  const matched = custs.filter(c=>{
+    if([c.name,c.kana,c.company,c.receipt_name].some(v=>v&&v.toLowerCase().includes(query))) return true;
+    const cb = bts.filter(b=>b.customer_id===c.id);
+    return cb.some(b=> (b.brand_name&&b.brand_name.toLowerCase().includes(query)) || String(b.number).includes(query));
+  }).slice(0,60);
+
+  const body=$('home-body');
+  if(!matched.length){
+    body.innerHTML = `<div class="empty-hint">「${esc(q)}」に一致するお客様が見つかりません</div>`;
+    return;
+  }
+  body.innerHTML = matched.map(c=>{
+    const cb = bts.filter(b=>b.customer_id===c.id && b.status==='keeping');
+    const bottlesHtml = cb.length
+      ? `<div class="result-bottles">${cb.map(b=>`<div class="bottle-chip ${b.display_status}"><div class="bc-brand">${esc(b.brand_name)}</div><div class="bc-num">No.${b.number}</div></div>`).join('')}</div>`
+      : `<div class="no-bottle">保管中のボトルはありません</div>`;
+    return `<div class="result-card" onclick="navTo('customer',{id:'${c.id}'})">
+      <div class="result-name">${esc(c.name)} 様</div>
+      <div class="result-sub">${c.company?esc(c.company)+' / ':''}${isAdmin()?esc(storeName(c.store_id)):''}</div>
+      ${bottlesHtml}
+    </div>`;
+  }).join('');
+}
+function renderDashboard(){
+  const custs=scopedCustomers();
+  const bts=scopedBottles();
+  const today=jstTodayStr();
+  const visitToday = custs.filter(c=>c.last_visit_at===today).length;
+  const keeping = bts.filter(b=>b.status==='keeping').length;
+  const expiringSoon = bts.filter(b=>b.display_status==='expiring_soon');
+  const expired = bts.filter(b=>b.display_status==='expired');
+
+  $('home-body').innerHTML = `
+    <div class="dash-grid">
+      <div class="dash-card"><div class="dl">本日の来店人数</div><div class="dv">${visitToday}<span class="du">人</span></div></div>
+      <div class="dash-card"><div class="dl">保管中ボトル本数</div><div class="dv">${keeping}<span class="du">本</span></div></div>
+      <div class="dash-card warn" onclick="navTo('expiry',{tab:'soon'})"><div class="dl">保管期限間近</div><div class="dv">${expiringSoon.length}<span class="du">件</span></div></div>
+      <div class="dash-card danger" onclick="navTo('expiry',{tab:'expired'})"><div class="dl">保管期限切れ</div><div class="dv">${expired.length}<span class="du">件</span></div></div>
+      <div class="dash-card full" onclick="navTo('numbers')"><div class="dl">空き番号確認</div><div class="dv" style="font-size:16px;color:var(--tx);">銘柄ごとの使用中／空き番号を見る →</div></div>
+    </div>
+    <div style="margin-top:20px;">
+      <button class="btn-p" onclick="navTo('customer-form',{mode:'new'})">＋ 新規お客様登録</button>
+    </div>
+  `;
+}
+
+/* ============================================================
+   来店登録
+============================================================ */
+async function registerVisit(customerId){
+  const c = customers.find(x=>x.id===customerId);
+  if(!c) return;
+  const today=jstTodayStr();
+  if(c.last_visit_at===today){
+    visitCtx={customerId};
+    $('visit-body').innerHTML = `
+      <div style="margin-bottom:18px;color:var(--sb);font-size:14px;">${esc(c.name)}様は本日すでに来店登録されています。追加で登録しますか？</div>
+      <div class="btn-row">
+        <button class="btn-s" onclick="closeOverlay('visit-overlay')">キャンセル</button>
+        <button class="btn-p" onclick="confirmVisitDup()">追加登録する</button>
+      </div>`;
+    $('visit-overlay').classList.add('show');
+    return;
+  }
+  await doRegisterVisit(customerId);
+}
+async function confirmVisitDup(){
+  closeOverlay('visit-overlay');
+  if(visitCtx) await doRegisterVisit(visitCtx.customerId,true);
+}
+async function doRegisterVisit(customerId){
+  const c = customers.find(x=>x.id===customerId);
+  const {error} = await sb.rpc('register_visit',{
+    p_customer_id: customerId,
+    p_staff_member_id: currentStaff.id,
+    p_staff_member_name: currentStaff.name
+  });
+  if(error){ toast('来店登録に失敗しました','var(--rd)'); return; }
+  toast(`${c.name}様の来店を登録しました`);
+  await loadScopeData();
+  if(curScreen==='customer') renderCustomerDetail(curParams);
+  if(curScreen==='home') renderHome();
+}
+
+/* ============================================================
+   お客様詳細
+============================================================ */
+async function renderCustomerDetail(params){
+  const root=$('screen-customer');
+  const c = customers.find(x=>x.id===params.id);
+  if(!c){ root.innerHTML=`<div class="empty-hint">お客様が見つかりません</div>`; return; }
+  const cb = bottles.filter(b=>b.customer_id===c.id).sort((a,b2)=>(a.status===b2.status?0:(a.status==='keeping'?-1:1)));
+  root.innerHTML = `
+    <div class="ph"><div class="ey">CUSTOMER</div><h2>${esc(c.name)} 様</h2></div>
+    <button class="btn-visit" onclick="registerVisit('${c.id}')">🔔 来店登録</button>
+    <div class="card">
+      <div class="ct">お客様情報<span><button class="be" onclick="navTo('customer-form',{mode:'edit',id:'${c.id}'})">編集</button></span></div>
+      <div class="kv"><span class="kk">フリガナ</span><span class="kvv">${esc(c.kana)||'-'}</span></div>
+      <div class="kv"><span class="kk">会社名</span><span class="kvv">${esc(c.company)||'-'}</span></div>
+      <div class="kv"><span class="kk">領収書名</span><span class="kvv">${esc(c.receipt_name)||'-'}</span></div>
+      <div class="kv"><span class="kk">電話番号</span><span class="kvv">${esc(c.phone)||'-'}</span></div>
+      <div class="kv"><span class="kk">メモ</span><span class="kvv">${esc(c.memo)||'-'}</span></div>
+      <div class="kv"><span class="kk">最終来店日</span><span class="kvv">${fmtDate(c.last_visit_at)||'-'}</span></div>
+      <div class="kv"><span class="kk">累計来店回数</span><span class="kvv">${c.visit_count}回</span></div>
+      ${isAdmin()?`<div class="kv"><span class="kk">店舗</span><span class="kvv">${esc(storeName(c.store_id))}</span></div>`:''}
+    </div>
+
+    <div class="ct" style="border:none;padding:0;margin:20px 0 12px;display:flex;justify-content:space-between;">
+      <span>ボトル</span><button class="be" onclick="navTo('bottle-form',{mode:'new',customerId:'${c.id}'})">＋ ボトル追加</button>
+    </div>
+    ${cb.length? cb.map(b=>bottleRowHtml(b)).join('') : `<div class="empty-hint">登録されたボトルはありません</div>`}
+
+    <div class="section-title">来店履歴</div>
+    <div class="card" id="visits-box"><div class="spinner"></div></div>
+
+    <div class="section-title">廃棄履歴</div>
+    <div class="card" id="disposals-box"><div class="spinner"></div></div>
+  `;
+  loadCustomerVisits(c.id);
+  loadCustomerDisposals(c.id);
+}
+function bottleRowHtml(b){
+  const expTxt = b.status==='disposed' ? '' : `<div class="exp">期限 ${fmtDate(b.expires_at)}</div>`;
+  return `<div class="bottle-row" onclick="navTo('bottle-form',{mode:'view',id:'${b.id}'})">
+    <div class="bl"><div class="bn-brand">${esc(b.brand_name)}</div><div class="bn-num">No.${b.number}</div></div>
+    <div class="br">${badgeHtml(b.display_status)}${expTxt}</div>
+  </div>`;
+}
+async function loadCustomerVisits(customerId){
+  const {data} = await sb.from('visits').select('*').eq('customer_id',customerId).order('visited_at',{ascending:false}).limit(50);
+  const box=$('visits-box');
+  if(!box) return;
+  if(!data||!data.length){ box.innerHTML=`<div class="center-msg">来店履歴はまだありません</div>`; return; }
+  box.innerHTML = data.map(v=>`<div class="li-row"><div class="ll"><div class="ln">${fmtDate(v.visited_date)}</div><div class="ls">${fmtDateTime(v.visited_at)} / 対応: ${esc(v.staff_member_name)||'-'}</div></div></div>`).join('');
+}
+async function loadCustomerDisposals(customerId){
+  const {data} = await sb.from('bottle_disposals').select('*').eq('customer_id',customerId).order('disposed_at',{ascending:false});
+  const box=$('disposals-box');
+  if(!box) return;
+  if(!data||!data.length){ box.innerHTML=`<div class="center-msg">廃棄履歴はありません</div>`; return; }
+  box.innerHTML = data.map(d=>`<div class="li-row"><div class="ll">
+      <div class="ln">${esc(d.brand_name)} No.${d.number}</div>
+      <div class="ls">廃棄日時 ${fmtDateTime(d.disposed_at)} / 担当 ${esc(d.staff_member_name)}</div>
+      <div class="ls">理由: ${reasonLabel(d.reason)}${d.note?' ／ '+esc(d.note):''}</div>
+    </div></div>`).join('');
+}
+
+/* ============================================================
+   お客様登録・編集
+============================================================ */
+function renderCustomerForm(params){
+  const root=$('screen-customer-form');
+  const editing = params.mode==='edit';
+  const c = editing ? customers.find(x=>x.id===params.id) : null;
+  const defaultStoreId = editing ? c.store_id : (isAdmin() ? (adminStoreFilter!=='all'?adminStoreFilter:(allStores[0]&&allStores[0].id)) : myProfile.store_id);
+  root.innerHTML = `
+    <div class="ph"><div class="ey">CUSTOMER</div><h2>${editing?'お客様情報の編集':'新規お客様登録'}</h2></div>
+    <div class="card">
+      ${(!editing && isAdmin())?`<div class="field"><label>所属店舗<span class="req">必須</span></label>
+        <select id="cf-store" onchange="initBottleFields('nf', this.value)">${allStores.map(s=>`<option value="${s.id}" ${s.id===defaultStoreId?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+      </div>`:''}
+      <div class="field"><label>お客様名<span class="req">必須</span></label><input type="text" id="cf-name" value="${esc(c?c.name:'')}" placeholder="例）田中 太郎"></div>
+      <div class="field"><label>フリガナ</label><input type="text" id="cf-kana" value="${esc(c?c.kana:'')}" placeholder="例）タナカ タロウ"></div>
+      <div class="field"><label>会社名</label><input type="text" id="cf-company" value="${esc(c?c.company:'')}"></div>
+      <div class="field"><label>領収書名</label><input type="text" id="cf-receipt" value="${esc(c?c.receipt_name:'')}"></div>
+      <div class="field"><label>電話番号</label><input type="tel" id="cf-phone" value="${esc(c?c.phone:'')}"></div>
+      <div class="field"><label>メモ</label><textarea id="cf-memo">${esc(c?c.memo:'')}</textarea></div>
+    </div>
+    ${!editing?`
+    <div class="card">
+      <div class="ct">最初の1本を登録（あとから追加も可能）</div>
+      ${bottleFieldsHtml('nf')}
+    </div>`:''}
+    <button class="btn-p" onclick="${editing?`submitCustomerEdit('${c.id}')`:'submitCustomerNew()'}">保存する</button>
+    <div id="cf-nameCheck"></div>
+  `;
+  if(!editing){ initBottleFields('nf', defaultStoreId); }
+}
+function targetStoreIdForNewCustomer(){
+  return isAdmin() ? ($('cf-store')?$('cf-store').value:(allStores[0]&&allStores[0].id)) : myProfile.store_id;
+}
+async function checkDuplicateName(name,storeId){
+  const list = customers.filter(c=> c.store_id===storeId && c.name.trim()===name.trim());
+  return list;
+}
+async function submitCustomerNew(){
+  const name=$('cf-name').value.trim();
+  if(!name){ toast('お客様名を入力してください','var(--rd)'); return; }
+  const dup = await checkDuplicateName(name, targetStoreIdForNewCustomer());
+  if(dup.length){
+    showDupWarning(dup, ()=>doCreateCustomer());
+    return;
+  }
+  await doCreateCustomer();
+}
+function showDupWarning(dupList,onProceed){
+  $('dup-body').innerHTML = `
+    <div style="margin-bottom:14px;color:var(--sb);font-size:14px;">同姓同名の別のお客様の可能性もあります。よくご確認ください。</div>
+    ${dupList.map(d=>{
+      const b = bottles.find(x=>x.customer_id===d.id && x.status==='keeping');
+      return `<div class="result-card" style="margin-bottom:10px;" onclick="closeOverlay('dup-overlay');navTo('customer',{id:'${d.id}'})">
+        <div class="result-name">${esc(d.name)} 様</div>
+        <div class="result-sub">最終来店 ${fmtDate(d.last_visit_at)||'-'}</div>
+        ${b?`<div class="bottle-chip"><div class="bc-brand">${esc(b.brand_name)}</div><div class="bc-num">No.${b.number}</div></div>`:''}
+      </div>`;
+    }).join('')}
+    <div class="btn-row" style="margin-top:10px;">
+      <button class="btn-s" onclick="closeOverlay('dup-overlay')">既存のお客様を確認</button>
+      <button class="btn-p" onclick="closeOverlay('dup-overlay');proceedDupCreate()">別のお客様として登録</button>
+    </div>
+  `;
+  $('dup-overlay')._proceed = onProceed;
+  $('dup-overlay').classList.add('show');
+}
+function proceedDupCreate(){
+  const fn=$('dup-overlay')._proceed;
+  if(fn) fn();
+}
+async function doCreateCustomer(){
+  const payload={
+    store_id: targetStoreIdForNewCustomer(),
+    name: $('cf-name').value.trim(),
+    kana: $('cf-kana').value.trim()||null,
+    company: $('cf-company').value.trim()||null,
+    receipt_name: $('cf-receipt').value.trim()||null,
+    phone: $('cf-phone').value.trim()||null,
+    memo: $('cf-memo').value.trim()||null,
+    created_by: session.user.id, updated_by: session.user.id
+  };
+  const {data,error} = await sb.from('customers').insert(payload).select().single();
+  if(error){ toast('登録できませんでした','var(--rd)'); return; }
+  await logAudit('customer_create',{customer_id:data.id,after:payload,store_id:payload.store_id});
+
+  const nf = readBottleFields('nf');
+  if(nf && nf.brandId && nf.number){
+    await createBottleRow(data.id, payload.store_id, nf);
+  }
+  toast(`${data.name}様を登録しました`);
+  await loadScopeData();
+  navStack=[]; showScreen('customer',{id:data.id});
+}
+async function submitCustomerEdit(id){
+  const before = customers.find(x=>x.id===id);
+  const payload={
+    name: $('cf-name').value.trim(),
+    kana: $('cf-kana').value.trim()||null,
+    company: $('cf-company').value.trim()||null,
+    receipt_name: $('cf-receipt').value.trim()||null,
+    phone: $('cf-phone').value.trim()||null,
+    memo: $('cf-memo').value.trim()||null,
+    updated_by: session.user.id, updated_at: new Date().toISOString()
+  };
+  if(!payload.name){ toast('お客様名を入力してください','var(--rd)'); return; }
+  const {error} = await sb.from('customers').update(payload).eq('id',id);
+  if(error){ toast('更新できませんでした','var(--rd)'); return; }
+  await logAudit('customer_update',{customer_id:id,before,after:payload,store_id:before.store_id});
+  toast('更新しました');
+  await loadScopeData();
+  goBack();
+}
+
+/* ============================================================
+   ボトル登録・編集フォーム部品（新規/追加 共通）
+============================================================ */
+function bottleFieldsHtml(prefix){
+  return `
+    <div class="field"><label>銘柄<span class="req">必須</span></label>
+      <select id="${prefix}-brand" onchange="onBrandChange('${prefix}')"></select>
+    </div>
+    <div class="field"><label>管理番号<span class="req">必須</span></label>
+      <input type="number" id="${prefix}-number" inputmode="numeric" placeholder="例）12">
+      <div class="hint" id="${prefix}-suggest"></div>
+    </div>
+    <div class="field"><label>登録日</label><input type="date" id="${prefix}-date" value="${jstTodayStr()}"></div>
+  `;
+}
+const bfStoreMap={};
+function initBottleFields(prefix,storeId){
+  const sel=$(prefix+'-brand');
+  if(!sel) return;
+  bfStoreMap[prefix] = storeId || myProfile.store_id || (allStores[0]&&allStores[0].id);
+  const list = brands.filter(b=>b.store_id===bfStoreMap[prefix]);
+  sel.innerHTML = `<option value="">選択してください</option>` + list.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  $(prefix+'-number').value='';
+  $(prefix+'-suggest').textContent='';
+  $(prefix+'-number').addEventListener('input',()=>validateNumberField(prefix));
+}
+function usedNumbersFor(storeId,brandId){
+  return bottles.filter(b=>b.store_id===storeId && b.brand_id===brandId && b.status==='keeping').map(b=>b.number).sort((a,b)=>a-b);
+}
+function suggestNumber(used){
+  if(!used.length) return 1;
+  for(let i=1;i<=used.length;i++){ if(!used.includes(i)) return i; }
+  return Math.max(...used)+1;
+}
+function onBrandChange(prefix){
+  const sel=$(prefix+'-brand');
+  const storeId = bfStoreMap[prefix];
+  const used = usedNumbersFor(storeId, sel.value);
+  const s = suggestNumber(used);
+  $(prefix+'-suggest').textContent = sel.value ? `おすすめ No.${s}（使用中: ${used.join('、')||'なし'}）` : '';
+  if(!$(prefix+'-number').value) $(prefix+'-number').value=s;
+  validateNumberField(prefix);
+}
+function validateNumberField(prefix){
+  const sel=$(prefix+'-brand');
+  const numEl=$(prefix+'-number');
+  const hint=$(prefix+'-suggest');
+  if(!sel.value || !numEl.value) return true;
+  const storeId = bfStoreMap[prefix];
+  const used = usedNumbersFor(storeId, sel.value);
+  const n = parseInt(numEl.value,10);
+  if(used.includes(n)){
+    hint.innerHTML = `<span style="color:var(--rd);">この番号は現在使用中です</span>`;
+    return false;
+  }
+  hint.innerHTML = `おすすめ No.${suggestNumber(used)}（使用中: ${used.join('、')||'なし'}）`;
+  return true;
+}
+function readBottleFields(prefix){
+  const sel=$(prefix+'-brand'), numEl=$(prefix+'-number'), dateEl=$(prefix+'-date');
+  if(!sel||!sel.value||!numEl.value) return null;
+  return {brandId:sel.value, brandName:sel.options[sel.selectedIndex].textContent, number:parseInt(numEl.value,10), registeredAt:dateEl.value||jstTodayStr()};
+}
+async function createBottleRow(customerId, storeId, fields){
+  if(!validateNumberFieldRaw(storeId,fields.brandId,fields.number)){
+    toast('この番号は現在使用中のため登録できませんでした','var(--rd)');
+    return null;
+  }
+  const payload={
+    store_id: storeId, customer_id: customerId, brand_id: fields.brandId, brand_name: fields.brandName,
+    number: fields.number, registered_at: fields.registeredAt, status:'keeping',
+    created_by: session.user.id, updated_by: session.user.id
+  };
+  const {data,error} = await sb.from('bottles').insert(payload).select().single();
+  if(error){
+    if(error.code==='23505') toast('この番号は現在使用中です','var(--rd)');
+    else toast('ボトルを登録できませんでした','var(--rd)');
+    return null;
+  }
+  await sb.from('bottle_history').insert({bottle_id:data.id,customer_id:customerId,store_id:storeId,event_type:'registered',after:payload,staff_member_id:currentStaff.id,staff_member_name:currentStaff.name,created_by:session.user.id});
+  await logAudit('bottle_create',{customer_id:customerId,bottle_id:data.id,after:payload,store_id:storeId});
+  return data;
+}
+function validateNumberFieldRaw(storeId,brandId,number){
+  const used = usedNumbersFor(storeId,brandId);
+  return !used.includes(number);
+}
+
+/* ============================================================
+   ボトル追加・編集・詳細画面
+============================================================ */
+function renderBottleForm(params){
+  const root=$('screen-bottle-form');
+  if(params.mode==='new'){
+    const c = customers.find(x=>x.id===params.customerId);
+    root.innerHTML = `
+      <div class="ph"><div class="ey">BOTTLE</div><h2>ボトル追加 - ${esc(c?c.name:'')}様</h2></div>
+      <div class="card">${bottleFieldsHtml('bf')}</div>
+      <button class="btn-p" onclick="submitBottleNew('${params.customerId}')">登録する</button>
+    `;
+    initBottleFields('bf', c ? c.store_id : myProfile.store_id);
+    return;
+  }
+  // view / edit existing bottle
+  const b = bottles.find(x=>x.id===params.id);
+  if(!b){ root.innerHTML=`<div class="empty-hint">ボトルが見つかりません</div>`; return; }
+  const c = customers.find(x=>x.id===b.customer_id);
+  const canEditExpiry = isAdmin();
+  root.innerHTML = `
+    <div class="ph"><div class="ey">BOTTLE</div><h2>${esc(b.brand_name)} No.${b.number}</h2></div>
+    <div class="card">
+      <div class="kv"><span class="kk">お客様</span><span class="kvv">${esc(c?c.name:'')} 様</span></div>
+      <div class="kv"><span class="kk">状態</span><span class="kvv">${badgeHtml(b.display_status)}</span></div>
+      <div class="kv"><span class="kk">登録日</span><span class="kvv">${fmtDate(b.registered_at)}</span></div>
+      <div class="kv"><span class="kk">最終来店日</span><span class="kvv">${fmtDate(b.last_visit_at)||'-'}</span></div>
+      <div class="kv"><span class="kk">保管期限</span><span class="kvv">${fmtDate(b.expires_at)}</span></div>
+    </div>
+    ${b.status==='disposed' ? `<div class="card" id="bf-disposal-box"><div class="spinner"></div></div>` : ''}
+    ${b.status==='keeping' && canEditExpiry ? `
+    <div class="card">
+      <div class="ct">保管期限の変更（管理者）</div>
+      <div class="field"><input type="date" id="bf-expiry" value="${b.expires_at}"></div>
+      <button class="be" onclick="submitExpiryChange('${b.id}')">保管期限を変更する</button>
+    </div>`:''}
+    ${b.status==='keeping' && !isAdmin() ? '' : ''}
+    ${b.status==='keeping' ? `
+    <div class="card">
+      <div class="ct">番号の訂正</div>
+      <div class="field"><input type="number" id="bf-number" value="${b.number}"></div>
+      <button class="be" onclick="submitNumberChange('${b.id}')">番号を変更する</button>
+    </div>
+    <button class="btn-danger" onclick="openDisposeSheet('${b.id}',null)">🗑 廃棄する</button>` : ''}
+  `;
+  if(b.status==='disposed'){ loadBottleDisposalDetail(b.id); }
+}
+async function loadBottleDisposalDetail(bottleId){
+  const {data} = await sb.from('bottle_disposals').select('*').eq('bottle_id',bottleId).order('disposed_at',{ascending:false}).limit(1);
+  const box=$('bf-disposal-box');
+  if(!box) return;
+  const d = data && data[0];
+  if(!d){ box.innerHTML = `<div class="center-msg">廃棄記録が見つかりません</div>`; return; }
+  box.innerHTML = `
+    <div class="ct">廃棄記録</div>
+    <div class="kv"><span class="kk">廃棄日時</span><span class="kvv">${fmtDateTime(d.disposed_at)}</span></div>
+    <div class="kv"><span class="kk">担当スタッフ</span><span class="kvv">${esc(d.staff_member_name)}</span></div>
+    <div class="kv"><span class="kk">廃棄理由</span><span class="kvv">${reasonLabel(d.reason)}</span></div>
+    <div class="kv"><span class="kk">備考</span><span class="kvv">${esc(d.note)||'なし'}</span></div>
+  `;
+}
+async function submitBottleNew(customerId){
+  const fields = readBottleFields('bf');
+  if(!fields){ toast('銘柄と番号を入力してください','var(--rd)'); return; }
+  const customer = customers.find(x=>x.id===customerId);
+  const created = await createBottleRow(customerId, customer.store_id, fields);
+  if(created){ toast('ボトルを登録しました'); await loadScopeData(); goBack(); showScreen('customer',{id:customerId}); }
+}
+async function submitExpiryChange(bottleId){
+  const b=bottles.find(x=>x.id===bottleId);
+  const newDate=$('bf-expiry').value;
+  if(!newDate) return;
+  const before={expires_at:b.expires_at};
+  const {error}=await sb.from('bottles').update({expires_at:newDate,updated_at:new Date().toISOString()}).eq('id',bottleId);
+  if(error){ toast('変更できませんでした','var(--rd)'); return; }
+  await sb.from('bottle_history').insert({bottle_id:bottleId,customer_id:b.customer_id,store_id:b.store_id,event_type:'expiry_changed',before,after:{expires_at:newDate},staff_member_id:currentStaff.id,staff_member_name:currentStaff.name,created_by:session.user.id});
+  await logAudit('expiry_change',{customer_id:b.customer_id,bottle_id:bottleId,before,after:{expires_at:newDate},store_id:b.store_id});
+  toast('保管期限を変更しました');
+  await loadScopeData();
+  renderBottleForm({mode:'view',id:bottleId});
+}
+async function submitNumberChange(bottleId){
+  const b=bottles.find(x=>x.id===bottleId);
+  const newNum=parseInt($('bf-number').value,10);
+  if(!newNum || newNum===b.number) return;
+  const used=usedNumbersFor(b.store_id,b.brand_id).filter(n=>n!==b.number);
+  if(used.includes(newNum)){ toast('この番号は現在使用中です','var(--rd)'); return; }
+  const before={number:b.number};
+  const {error}=await sb.from('bottles').update({number:newNum,updated_at:new Date().toISOString()}).eq('id',bottleId);
+  if(error){ toast(error.code==='23505'?'この番号は現在使用中です':'変更できませんでした','var(--rd)'); return; }
+  await sb.from('bottle_history').insert({bottle_id:bottleId,customer_id:b.customer_id,store_id:b.store_id,event_type:'number_changed',before,after:{number:newNum},staff_member_id:currentStaff.id,staff_member_name:currentStaff.name,created_by:session.user.id});
+  await logAudit('number_change',{customer_id:b.customer_id,bottle_id:bottleId,before,after:{number:newNum},store_id:b.store_id});
+  toast('番号を変更しました');
+  await loadScopeData();
+  renderBottleForm({mode:'view',id:bottleId});
+}
+
+/* ============================================================
+   廃棄
+============================================================ */
+function openDisposeSheet(bottleId, defaultReason){
+  const b = bottles.find(x=>x.id===bottleId);
+  const c = customers.find(x=>x.id===b.customer_id);
+  disposeCtx={bottleId};
+  $('dispose-body').innerHTML = `
+    <div class="kv"><span class="kk">お客様</span><span class="kvv">${esc(c.name)} 様</span></div>
+    <div class="kv"><span class="kk">銘柄</span><span class="kvv">${esc(b.brand_name)}</span></div>
+    <div class="kv"><span class="kk">管理番号</span><span class="kvv">No.${b.number}</span></div>
+    <div class="kv"><span class="kk">現在の状態</span><span class="kvv">${badgeHtml(b.display_status)}</span></div>
+    <div class="kv"><span class="kk">保管期限</span><span class="kvv">${fmtDate(b.expires_at)}</span></div>
+    <div class="field" style="margin-top:16px;"><label>廃棄理由<span class="req">必須</span></label>
+      <select id="ds-reason" onchange="onReasonChange()">
+        ${defaultReason?'':'<option value="">選択してください</option>'}
+        <option value="expired" ${defaultReason==='expired'?'selected':''}>保管期限切れ</option>
+        <option value="empty">飲み切り・空</option>
+        <option value="other">その他</option>
+      </select>
+    </div>
+    <div class="field" id="ds-note-field"><label>備考・廃棄理由<span class="req" id="ds-note-req" style="display:none;">必須</span></label>
+      <textarea id="ds-note" placeholder="例）出入り禁止のため／お客様本人から処分依頼／店舗判断により処分"></textarea>
+    </div>
+    <div class="btn-row" style="margin-top:6px;">
+      <button class="btn-s" onclick="closeOverlay('dispose-overlay')">キャンセル</button>
+      <button class="btn-danger" onclick="submitDispose()">廃棄する</button>
+    </div>
+  `;
+  $('dispose-overlay').classList.add('show');
+  onReasonChange();
+}
+function onReasonChange(){
+  const r=$('ds-reason').value;
+  $('ds-note-req').style.display = r==='other' ? 'inline' : 'none';
+}
+async function submitDispose(){
+  const reason=$('ds-reason').value;
+  const note=$('ds-note').value.trim();
+  if(!reason){ toast('廃棄理由を選択してください','var(--rd)'); return; }
+  if(reason==='other' && !note){ toast('その他を選んだ場合は備考の入力が必要です','var(--rd)'); return; }
+  const {error} = await sb.rpc('dispose_bottle',{
+    p_bottle_id: disposeCtx.bottleId, p_reason: reason, p_note: note||null,
+    p_staff_member_id: currentStaff.id, p_staff_member_name: currentStaff.name
+  });
+  if(error){ toast('廃棄処理に失敗しました','var(--rd)'); return; }
+  closeOverlay('dispose-overlay');
+  toast('廃棄しました。番号は空き番号に戻りました');
+  await loadScopeData();
+  if(curScreen==='expiry') renderExpiry();
+  else if(curScreen==='customer') renderCustomerDetail(curParams);
+  else goBack();
+}
+function closeOverlay(id){ $(id).classList.remove('show'); }
+
+/* ============================================================
+   保管期限管理
+============================================================ */
+function renderExpiry(params){
+  const tab = (params&&params.tab) || $('screen-expiry')._tab || 'soon';
+  $('screen-expiry')._tab = tab;
+  const bts = scopedBottles().filter(b=>b.status==='keeping');
+  const soon = bts.filter(b=>b.display_status==='expiring_soon').sort((a,b)=>a.expires_at.localeCompare(b.expires_at));
+  const expired = bts.filter(b=>b.display_status==='expired').sort((a,b)=>a.expires_at.localeCompare(b.expires_at));
+  const list = tab==='soon'?soon:expired;
+
+  $('screen-expiry').innerHTML = `
+    <div class="ph"><div class="ey">EXPIRY</div><h2>保管期限管理</h2></div>
+    <div class="tabbar">
+      <div class="tb ${tab==='soon'?'active':''}" onclick="renderExpiry({tab:'soon'})">保管期限間近 ${soon.length}件</div>
+      <div class="tb ${tab==='expired'?'active':''}" onclick="renderExpiry({tab:'expired'})">保管期限切れ ${expired.length}件</div>
+    </div>
+    ${adminScopeBarHtml()}
+    <div id="expiry-list">
+      ${list.length ? list.map(b=>expiryRowHtml(b,tab)).join('') : `<div class="empty-hint">該当するボトルはありません</div>`}
+    </div>
+  `;
+}
+function expiryRowHtml(b,tab){
+  const c = customers.find(x=>x.id===b.customer_id);
+  const days = b.days_until_expiry;
+  const daysTxt = tab==='soon' ? `残り${days}日` : `${Math.abs(days)}日経過`;
+  return `<div class="card" style="padding:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div style="font-size:17px;font-weight:800;">${esc(c?c.name:'')} 様</div>
+        <div style="font-size:13px;color:var(--mu);margin:2px 0 8px;">最終来店 ${fmtDate(b.last_visit_at)||'-'}${isAdmin()?' / '+esc(storeName(b.store_id)):''}</div>
+        <div style="font-size:15px;font-weight:700;">${esc(b.brand_name)} <span style="font-family:'DM Mono',monospace;font-size:22px;color:var(--ac2);">No.${b.number}</span></div>
+      </div>
+      <div style="text-align:right;">
+        ${badgeHtml(b.display_status)}
+        <div style="font-size:12px;color:var(--mu);margin-top:6px;">期限 ${fmtDate(b.expires_at)}</div>
+        <div style="font-size:13px;font-weight:700;color:${tab==='expired'?'var(--rd)':'var(--or)'};">${daysTxt}</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn-s" onclick="navTo('customer',{id:'${b.customer_id}'})">お客様を見る</button>
+      ${tab==='expired'?`<button class="btn-danger" onclick="openDisposeSheet('${b.id}','expired')">廃棄する</button>`:''}
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   空き番号確認
+============================================================ */
+function renderNumbers(){
+  const storeId = resolvedAdminStoreId();
+  const storeBrands = brands.filter(b=>b.store_id===storeId);
+  $('screen-numbers').innerHTML = `
+    <div class="ph"><div class="ey">NUMBERS</div><h2>空き番号確認</h2></div>
+    ${adminScopeBarHtml()}
+    ${storeBrands.map(brand=>{
+      const used = usedNumbersFor(storeId,brand.id);
+      const maxN = used.length?Math.max(...used):0;
+      const free=[]; for(let i=1;i<maxN;i++){ if(!used.includes(i)) free.push(i); }
+      return `<div class="card">
+        <div class="ct">${esc(brand.name)}</div>
+        <div class="kv"><span class="kk">使用中</span><span class="kvv">${used.length?used.join('、'):'なし'}</span></div>
+        <div class="kv"><span class="kk">空き</span><span class="kvv" style="color:var(--gn);">${free.length?free.join('、'):'なし'}</span></div>
+        <div class="kv"><span class="kk">おすすめ番号</span><span class="kvv" style="color:var(--ac2);font-family:'DM Mono',monospace;font-size:18px;">No.${suggestNumber(used)}</span></div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+/* ============================================================
+   メニュー
+============================================================ */
+function renderMenu(){
+  const admin = isAdmin();
+  $('screen-menu').innerHTML = `
+    <div class="ph"><div class="ey">MENU</div><h2>メニュー</h2></div>
+    <div class="section-title">店舗の管理</div>
+    <div class="card" style="padding:0;">
+      ${menuItem('🍾 銘柄管理',"navTo('brands')")}
+      ${menuItem('🧑 スタッフ名簿',"navTo('staff')")}
+      ${!admin? menuItem('🔁 スタッフ切替',"switchStaff()"):''}
+      ${menuItem('🗑 廃棄履歴',"navTo('disposals')")}
+    </div>
+    ${admin?`
+    <div class="section-title">管理者メニュー</div>
+    <div class="card" style="padding:0;">
+      ${menuItem('🏬 店舗管理',"navTo('stores')")}
+      ${menuItem('📜 操作履歴',"navTo('audit')")}
+      ${menuItem('⬇️ CSV出力',"navTo('csv')")}
+      ${menuItem('🗄 データ管理（完全削除）',"navTo('datamanage')")}
+    </div>`:''}
+    <button class="btn-s" style="margin-top:24px;color:var(--rd);border-color:rgba(224,108,117,.3);" onclick="logout()">ログアウト</button>
+  `;
+}
+function menuItem(label,onclick){
+  return `<div class="li-row" style="padding:16px 18px;cursor:pointer;" onclick="${onclick}"><div class="ll"><div class="ln">${label}</div></div><div style="color:var(--mu);">›</div></div>`;
+}
+
+/* ============================================================
+   銘柄管理
+============================================================ */
+function renderBrands(){
+  const storeId = resolvedAdminStoreId();
+  const list = brands.filter(b=>b.store_id===storeId);
+  $('screen-brands').innerHTML = `
+    <div class="ph"><div class="ey">BRANDS</div><h2>銘柄管理</h2></div>
+    ${adminScopeBarHtml()}
+    <div class="card">
+      <div class="ct">銘柄を追加</div>
+      <div class="btn-row">
+        <input type="text" id="brand-new-name" placeholder="銘柄名">
+        <button class="be" style="min-width:70px;" onclick="addBrand('${storeId}')">追加</button>
+      </div>
+    </div>
+    ${list.map(b=>`<div class="li-row" style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:8px;">
+      <div class="ll"><input type="text" value="${esc(b.name)}" id="brand-name-${b.id}" style="min-height:40px;padding:8px 10px;"></div>
+      <div class="btn-row" style="flex:0 0 auto;gap:6px;">
+        <button class="be" onclick="renameBrand('${b.id}')">保存</button>
+        <button class="bd2" onclick="deleteBrand('${b.id}')">削除</button>
+      </div>
+    </div>`).join('')}
+  `;
+}
+async function addBrand(storeId){
+  const name=$('brand-new-name').value.trim();
+  if(!name) return;
+  const {error} = await sb.from('bottle_brands').insert({store_id:storeId,name,sort_order:brands.filter(b=>b.store_id===storeId).length+1});
+  if(error){ toast('この銘柄はすでに登録されています','var(--rd)'); return; }
+  toast('銘柄を追加しました');
+  await reloadBrandsQuiet();
+  renderBrands();
+}
+async function renameBrand(id){
+  const name=$('brand-name-'+id).value.trim();
+  if(!name) return;
+  const {error} = await sb.from('bottle_brands').update({name,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast('変更できませんでした','var(--rd)'); return; }
+  toast('変更しました');
+  await reloadBrandsQuiet();
+  renderBrands();
+}
+async function deleteBrand(id){
+  const {error} = await sb.from('bottle_brands').update({deleted_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast('削除できませんでした','var(--rd)'); return; }
+  toast('削除しました');
+  await reloadBrandsQuiet();
+  renderBrands();
+}
+
+/* ============================================================
+   スタッフ名簿
+============================================================ */
+function renderStaffAdmin(){
+  const storeId = resolvedAdminStoreId();
+  const list = staffMembers.filter(s=>s.store_id===storeId);
+  $('screen-staff').innerHTML = `
+    <div class="ph"><div class="ey">STAFF</div><h2>スタッフ名簿</h2></div>
+    ${adminScopeBarHtml()}
+    <div class="card">
+      <div class="ct">スタッフを追加</div>
+      <div class="btn-row">
+        <input type="text" id="staff-new-name" placeholder="スタッフ名">
+        <button class="be" style="min-width:70px;" onclick="addStaffAdmin('${storeId}')">追加</button>
+      </div>
+    </div>
+    ${list.map(s=>`<div class="li-row" style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:8px;">
+      <div class="ll"><div class="ln">${esc(s.name)}</div><div class="ls">${s.active?'有効':'無効'}</div></div>
+      <button class="be" onclick="toggleStaffActive('${s.id}',${!s.active})">${s.active?'無効にする':'有効にする'}</button>
+    </div>`).join('')}
+  `;
+}
+async function addStaffAdmin(storeId){
+  const name=$('staff-new-name').value.trim();
+  if(!name) return;
+  const {error}=await sb.from('staff_members').insert({store_id:storeId,name,created_by:session.user.id});
+  if(error){ toast('追加できませんでした','var(--rd)'); return; }
+  toast('追加しました');
+  await reloadStaffQuiet();
+  renderStaffAdmin();
+}
+async function toggleStaffActive(id,val){
+  await sb.from('staff_members').update({active:val,updated_at:new Date().toISOString()}).eq('id',id);
+  await reloadStaffQuiet();
+  renderStaffAdmin();
+}
+
+/* ============================================================
+   廃棄履歴（一覧・絞り込み）
+============================================================ */
+async function renderDisposals(){
+  const root=$('screen-disposals');
+  root.innerHTML = `
+    <div class="ph"><div class="ey">DISPOSALS</div><h2>廃棄履歴</h2></div>
+    <div class="fbar">
+      ${isAdmin()?`<select class="fsel" id="df-store"><option value="">全店舗</option>${allStores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`:''}
+      <input type="date" class="fsel" id="df-from">
+      <input type="date" class="fsel" id="df-to">
+      <input type="text" class="finp" id="df-cust" placeholder="お客様名">
+      <input type="text" class="finp" id="df-brand" placeholder="銘柄">
+      <input type="text" class="finp" id="df-number" placeholder="番号">
+      <select class="fsel" id="df-reason"><option value="">理由すべて</option><option value="expired">保管期限切れ</option><option value="empty">飲み切り・空</option><option value="other">その他</option></select>
+      <input type="text" class="finp" id="df-staff" placeholder="担当スタッフ">
+      <button class="be" onclick="loadDisposals()">絞り込む</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>廃棄日時</th><th>店舗</th><th>お客様</th><th>銘柄</th><th>番号</th><th>理由</th><th>担当</th><th>備考</th></tr></thead>
+      <tbody id="df-body"><tr><td colspan="8" class="center-msg">絞り込んで検索してください</td></tr></tbody>
+    </table></div>
+  `;
+  await loadDisposals();
+}
+async function loadDisposals(){
+  let q = sb.from('bottle_disposals').select('*').order('disposed_at',{ascending:false}).limit(300);
+  if(!isAdmin()) q=q.eq('store_id',myProfile.store_id);
+  else { const sid=$('df-store').value; if(sid) q=q.eq('store_id',sid); }
+  const from=$('df-from').value, to=$('df-to').value;
+  if(from) q=q.gte('disposed_at',from+'T00:00:00+09:00');
+  if(to) q=q.lte('disposed_at',to+'T23:59:59+09:00');
+  const cust=$('df-cust').value.trim(); if(cust) q=q.ilike('customer_name','%'+cust+'%');
+  const brand=$('df-brand').value.trim(); if(brand) q=q.ilike('brand_name','%'+brand+'%');
+  const num=$('df-number').value.trim(); if(num) q=q.eq('number',parseInt(num,10)||-1);
+  const reason=$('df-reason').value; if(reason) q=q.eq('reason',reason);
+  const staff=$('df-staff').value.trim(); if(staff) q=q.ilike('staff_member_name','%'+staff+'%');
+  const {data,error} = await q;
+  const body=$('df-body');
+  if(error||!data||!data.length){ body.innerHTML=`<tr><td colspan="8" class="center-msg">該当する記録がありません</td></tr>`; return; }
+  body.innerHTML = data.map(d=>`<tr>
+    <td class="tm">${fmtDateTime(d.disposed_at)}</td><td>${esc(d.store_name)}</td><td>${esc(d.customer_name)}</td>
+    <td>${esc(d.brand_name)}</td><td class="tm">No.${d.number}</td><td>${reasonLabel(d.reason)}</td>
+    <td>${esc(d.staff_member_name)}</td><td>${esc(d.note)||'-'}</td>
+  </tr>`).join('');
+}
+
+/* ============================================================
+   操作履歴（管理者）
+============================================================ */
+async function renderAudit(){
+  if(!isAdmin()){ $('screen-audit').innerHTML=`<div class="empty-hint">権限がありません</div>`; return; }
+  $('screen-audit').innerHTML = `
+    <div class="ph"><div class="ey">AUDIT LOG</div><h2>操作履歴</h2></div>
+    <div class="fbar">
+      <select class="fsel" id="au-store"><option value="">全店舗</option>${allStores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <select class="fsel" id="au-action"><option value="">操作すべて</option>
+        <option value="customer_create">お客様登録</option><option value="customer_update">お客様編集</option>
+        <option value="bottle_create">ボトル登録</option><option value="bottle_update">ボトル編集</option>
+        <option value="visit_create">来店登録</option><option value="bottle_dispose">ボトル廃棄</option>
+        <option value="number_change">番号変更</option><option value="expiry_change">保管期限変更</option></select>
+      <button class="be" onclick="loadAudit()">絞り込む</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>日時</th><th>店舗</th><th>操作</th><th>スタッフ</th><th>詳細</th></tr></thead>
+      <tbody id="au-body"><tr><td colspan="5" class="center-msg">読み込み中…</td></tr></tbody>
+    </table></div>
+  `;
+  await loadAudit();
+}
+const ACTION_LABEL={customer_create:'お客様登録',customer_update:'お客様編集',bottle_create:'ボトル登録',bottle_update:'ボトル編集',visit_create:'来店登録',bottle_dispose:'ボトル廃棄',number_change:'番号変更',expiry_change:'保管期限変更'};
+async function loadAudit(){
+  let q=sb.from('audit_logs').select('*').order('created_at',{ascending:false}).limit(300);
+  const sid=$('au-store').value; if(sid) q=q.eq('store_id',sid);
+  const act=$('au-action').value; if(act) q=q.eq('action',act);
+  const {data,error}=await q;
+  const body=$('au-body');
+  if(error||!data||!data.length){ body.innerHTML=`<tr><td colspan="5" class="center-msg">該当する記録がありません</td></tr>`; return; }
+  body.innerHTML=data.map(a=>`<tr>
+    <td class="tm">${fmtDateTime(a.created_at)}</td><td>${esc(storeName(a.store_id))}</td>
+    <td>${ACTION_LABEL[a.action]||a.action}</td><td>${esc(a.staff_member_name)||'-'}</td>
+    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(JSON.stringify(a.after||a.before||{}))}</td>
+  </tr>`).join('');
+}
+async function logAudit(action,ctx){
+  await sb.from('audit_logs').insert({
+    store_id: ctx.store_id, action, actor_id: session.user.id,
+    staff_member_id: currentStaff?currentStaff.id:null, staff_member_name: currentStaff?currentStaff.name:null,
+    customer_id: ctx.customer_id||null, bottle_id: ctx.bottle_id||null,
+    before: ctx.before||null, after: ctx.after||null
+  });
+}
+
+/* ============================================================
+   店舗管理（管理者）
+============================================================ */
+function renderStores(){
+  if(!isAdmin()){ $('screen-stores').innerHTML=`<div class="empty-hint">権限がありません</div>`; return; }
+  $('screen-stores').innerHTML = `
+    <div class="ph"><div class="ey">STORES</div><h2>店舗管理</h2></div>
+    <div class="card">
+      <div class="ct">店舗を追加</div>
+      <div class="btn-row"><input type="text" id="store-new-name" placeholder="店舗名"><button class="be" style="min-width:70px;" onclick="addStore()">追加</button></div>
+      <div class="hint">追加後、ログインアカウントの発行はSupabaseの管理画面で行う必要があります（別途ご案内します）。</div>
+    </div>
+    ${allStores.map(s=>`<div class="li-row" style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:8px;">
+      <div class="ll"><input type="text" value="${esc(s.name)}" id="store-name-${s.id}" style="min-height:40px;padding:8px 10px;"></div>
+      <button class="be" onclick="renameStore('${s.id}')">保存</button>
+    </div>`).join('')}
+  `;
+}
+async function addStore(){
+  const name=$('store-new-name').value.trim();
+  if(!name) return;
+  const {error}=await sb.from('stores').insert({name});
+  if(error){ toast('追加できませんでした（同じ名前がすでにあるかもしれません）','var(--rd)'); return; }
+  toast('店舗を追加しました。既定の銘柄も自動で登録されました');
+  const {data}=await sb.from('stores').select('*').order('name');
+  allStores=data||allStores;
+  renderStores();
+}
+async function renameStore(id){
+  const name=$('store-name-'+id).value.trim();
+  if(!name) return;
+  await sb.from('stores').update({name}).eq('id',id);
+  toast('変更しました');
+  const {data}=await sb.from('stores').select('*').order('name');
+  allStores=data||allStores;
+  renderStores();
+}
+
+/* ============================================================
+   CSV出力（管理者）
+============================================================ */
+function renderCsv(){
+  if(!isAdmin()){ $('screen-csv').innerHTML=`<div class="empty-hint">権限がありません</div>`; return; }
+  $('screen-csv').innerHTML = `
+    <div class="ph"><div class="ey">CSV EXPORT</div><h2>CSV出力</h2></div>
+    <div class="card">
+      <div class="field"><label>対象店舗</label>
+        <select class="fsel" id="csv-store" style="width:100%;"><option value="all">全店舗</option>${allStores.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="card" style="padding:0;">
+      ${menuItem('顧客一覧',"exportCsv('customers')")}
+      ${menuItem('保管中ボトル一覧',"exportCsv('bottles')")}
+      ${menuItem('来店履歴',"exportCsv('visits')")}
+      ${menuItem('廃棄履歴',"exportCsv('disposals')")}
+      ${menuItem('全ボトル履歴',"exportCsv('allbottles')")}
+    </div>
+  `;
+}
+function csvEscape(v){
+  const s = v==null?'':String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function downloadCsv(filename,rows){
+  const csv = '\uFEFF'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+async function exportCsv(kind){
+  const storeSel = $('csv-store').value;
+  const ids = storeSel==='all' ? allStores.map(s=>s.id) : [storeSel];
+  if(kind==='customers'){
+    const {data}=await sb.from('customers').select('*').in('store_id',ids).is('deleted_at',null);
+    const rows=[['店舗','お客様名','フリガナ','会社名','領収書名','電話番号','メモ','最終来店日','累計来店回数','登録日','更新日']];
+    (data||[]).forEach(c=>rows.push([storeName(c.store_id),c.name,c.kana,c.company,c.receipt_name,c.phone,c.memo,fmtDate(c.last_visit_at),c.visit_count,fmtDate(c.created_at),fmtDate(c.updated_at)]));
+    downloadCsv('顧客一覧.csv',rows);
+  } else if(kind==='bottles'){
+    const {data}=await sb.from('v_bottles').select('*').in('store_id',ids).eq('status','keeping');
+    const rows=[['店舗','お客様名','銘柄','番号','登録日','最終来店日','保管期限','状態']];
+    (data||[]).forEach(b=>rows.push([b.store_name,b.customer_name,b.brand_name,b.number,fmtDate(b.registered_at),fmtDate(b.last_visit_at),fmtDate(b.expires_at),statusLabel(b.display_status)]));
+    downloadCsv('保管中ボトル一覧.csv',rows);
+  } else if(kind==='visits'){
+    const {data}=await sb.from('visits').select('*, customers(name), stores(name)').in('store_id',ids).order('visited_at',{ascending:false}).limit(5000);
+    const rows=[['来店日時','店舗','お客様名','担当スタッフ']];
+    (data||[]).forEach(v=>rows.push([fmtDateTime(v.visited_at), v.stores?v.stores.name:'', v.customers?v.customers.name:'', v.staff_member_name]));
+    downloadCsv('来店履歴.csv',rows);
+  } else if(kind==='disposals'){
+    const {data}=await sb.from('bottle_disposals').select('*').in('store_id',ids).order('disposed_at',{ascending:false}).limit(5000);
+    const rows=[['廃棄日時','店舗','お客様','銘柄','番号','廃棄理由','担当スタッフ','備考']];
+    (data||[]).forEach(d=>rows.push([fmtDateTime(d.disposed_at),d.store_name,d.customer_name,d.brand_name,d.number,reasonLabel(d.reason),d.staff_member_name,d.note]));
+    downloadCsv('廃棄履歴.csv',rows);
+  } else if(kind==='allbottles'){
+    const {data}=await sb.from('v_bottles').select('*').in('store_id',ids);
+    const rows=[['店舗','お客様名','銘柄','番号','登録日','最終来店日','保管期限','状態']];
+    (data||[]).forEach(b=>rows.push([b.store_name,b.customer_name,b.brand_name,b.number,fmtDate(b.registered_at),fmtDate(b.last_visit_at),fmtDate(b.expires_at),statusLabel(b.display_status)]));
+    downloadCsv('全ボトル履歴.csv',rows);
+  }
+  toast('CSVをダウンロードしました');
+}
+
+/* ============================================================
+   データ管理（完全削除・管理者専用）
+============================================================ */
+function renderDataManage(){
+  if(!isAdmin()){ $('screen-datamanage').innerHTML=`<div class="empty-hint">権限がありません</div>`; return; }
+  const deleted = customers.filter(c=>false); // 論理削除済みは通常キャッシュに含まれないため個別取得
+  $('screen-datamanage').innerHTML = `
+    <div class="ph"><div class="ey">DATA</div><h2>データ管理</h2></div>
+    <div class="hint" style="margin-bottom:14px;">誤って登録したお客様を、論理削除（一覧から非表示）→完全削除の順で処理できます。通常の操作では行わないでください。</div>
+    <div class="card">
+      <div class="ct">お客様を検索して削除</div>
+      <input type="text" id="dm-search" placeholder="お客様名で検索" oninput="dmSearch()">
+      <div id="dm-results" style="margin-top:12px;"></div>
+    </div>
+  `;
+}
+function dmSearch(){
+  const q=$('dm-search').value.trim().toLowerCase();
+  const box=$('dm-results');
+  if(!q){ box.innerHTML=''; return; }
+  const list = customers.filter(c=>c.name.toLowerCase().includes(q)).slice(0,20);
+  box.innerHTML = list.map(c=>`<div class="li-row"><div class="ll"><div class="ln">${esc(c.name)}</div><div class="ls">${esc(storeName(c.store_id))}</div></div>
+    <button class="bd2" onclick="softDeleteCustomer('${c.id}')">論理削除</button></div>`).join('') || `<div class="center-msg">該当なし</div>`;
+}
+async function softDeleteCustomer(id){
+  if(!confirm) {}
+  const c=customers.find(x=>x.id===id);
+  showConfirm('お客様を削除しますか？',`${esc(c.name)}様を一覧から非表示にします。完全削除ではありません。`, async ()=>{
+    await sb.from('customers').update({deleted_at:new Date().toISOString(),deleted_by:session.user.id}).eq('id',id);
+    await logAudit('customer_update',{customer_id:id,after:{deleted:true},store_id:c.store_id});
+    toast('削除しました');
+    await loadScopeData();
+    renderDataManage();
+  });
+}
+function showConfirm(title,body,onYes){
+  $('confirm-title').textContent=title;
+  $('confirm-body').innerHTML = `<div style="color:var(--sb);font-size:14px;margin-bottom:16px;">${body}</div>
+    <div class="btn-row"><button class="btn-s" onclick="closeOverlay('confirm-overlay')">キャンセル</button><button class="btn-danger" id="confirm-yes">実行する</button></div>`;
+  $('confirm-yes').onclick=()=>{ closeOverlay('confirm-overlay'); onYes(); };
+  $('confirm-overlay').classList.add('show');
+}
+</script>
+</body>
+</html>
