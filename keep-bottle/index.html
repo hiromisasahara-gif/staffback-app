@@ -796,7 +796,16 @@ function startVoiceSearch(){
   rec.maxAlternatives = 1;
 
   rec.onresult = (ev)=>{
-    const transcript = (ev.results && ev.results[0] && ev.results[0][0]) ? ev.results[0][0].transcript.trim() : '';
+    // 発話の区切り方によっては results に複数の確定結果が入ることがあるため、
+    // 先頭(results[0])だけでなく確定済みの結果をすべてつなげて検索語にする
+    let transcript = '';
+    if(ev.results){
+      for(let i=0;i<ev.results.length;i++){
+        const r = ev.results[i];
+        if(r && r[0] && r.isFinal !== false) transcript += r[0].transcript;
+      }
+    }
+    transcript = transcript.trim();
     if(!transcript){
       toast('音声を認識できませんでした。もう一度お試しください。','var(--rd)');
       return;
@@ -884,6 +893,17 @@ function renderSearchResults(q){
   const body=$('home-body');
   if(!matched.length){
     body.innerHTML = `<div class="empty-hint">「${esc(q)}」に一致するお客様が見つかりません</div>`;
+    // 診断用ログ（画面には出さず、ブラウザの開発者ツール Console にのみ出力する）。
+    // 実データで検索が一致しない原因調査のため、正規化後の検索語と
+    // スコープ内の件数・銘柄一覧を出しておく。
+    try{
+      console.debug('[keep-bottle search miss]', {
+        rawQuery:q, queryNorm, queryTokens,
+        scopedCustomerCount:custs.length, scopedBottleCount:bts.length,
+        scopeIds:activeScopeIds(), isAdmin:isAdmin(), adminStoreFilter,
+        brandNamesInScope:[...new Set(bts.map(b=>b.brand_name))]
+      });
+    }catch(e){}
     return;
   }
   body.innerHTML = matched.map(({c})=>{
