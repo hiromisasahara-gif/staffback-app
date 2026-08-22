@@ -392,7 +392,7 @@ let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
 // デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
 // 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
-const APP_VERSION = 'kb-2026-08-22-9';
+const APP_VERSION = 'kb-2026-08-22-10';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -1011,7 +1011,7 @@ async function renderCustomerDetail(params){
       ${isAdmin()?`<div class="kv"><span class="kk">店舗</span><span class="kvv">${esc(storeName(c.store_id))}</span></div>`:''}
     </div>
 
-    <div class="ct" style="border:none;padding:0;margin:20px 0 12px;display:flex;justify-content:space-between;">
+    <div class="ct" id="bottles-section" style="border:none;padding:0;margin:20px 0 12px;display:flex;justify-content:space-between;">
       <span>ボトル</span><button class="be" onclick="navTo('bottle-form',{mode:'new',customerId:'${c.id}'})">＋ ボトル追加</button>
     </div>
     ${cb.length? cb.map(b=>bottleRowHtml(b)).join('') : `<div class="empty-hint">登録されたボトルはありません</div>`}
@@ -1028,6 +1028,33 @@ async function renderCustomerDetail(params){
   loadCustomerDisposals(c.id);
 }
 const CUSTOMER_DELETE_REASONS = {duplicate:'重複登録', test:'テストデータ', mistake:'入力間違い', other:'その他'};
+// 保管中ボトルがあり削除できない場合の案内シート。「ボトルを確認する」からお客様詳細の
+// ボトル一覧まで直接ジャンプできるようにし、そのままボトル詳細→廃棄／番号変更（移行）へ進める。
+function showBottleBlockSheet(customerId, customerName){
+  $('confirm-title').textContent='削除できません';
+  $('confirm-body').innerHTML = `
+    <div style="color:var(--sb);font-size:14px;margin-bottom:16px;">${esc(customerName)}様には保管中のボトルがあります。先にボトルを廃棄・移行してください。</div>
+    <div class="btn-row">
+      <button class="btn-s" onclick="closeOverlay('confirm-overlay')">閉じる</button>
+      <button class="btn-p" onclick="goToCustomerBottles('${customerId}')">ボトルを確認する</button>
+    </div>`;
+  $('confirm-overlay').classList.add('show');
+}
+function goToCustomerBottles(customerId){
+  closeOverlay('confirm-overlay');
+  const keeping = bottles.filter(b=>b.customer_id===customerId && b.status==='keeping');
+  navTo('customer',{id:customerId});
+  if(keeping.length===1){
+    // 保管中が1本だけなら、そのボトルの詳細画面まで直接開く（廃棄・番号変更にすぐ進める）
+    navTo('bottle-form',{mode:'view',id:keeping[0].id});
+    return;
+  }
+  // 複数本ある場合は、お客様詳細のボトル一覧位置までスクロールして選んでもらう
+  setTimeout(()=>{
+    const el = $('bottles-section');
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 60);
+}
 let _deleteCustomerCtx=null;
 function openCustomerDeleteSheet(customerId, onDone){
   const c = customers.find(x=>x.id===customerId);
@@ -1035,7 +1062,7 @@ function openCustomerDeleteSheet(customerId, onDone){
   if(!isAdmin() && c.store_id!==myProfile.store_id){ toast('この操作はできません','var(--rd)'); return; }
   const keepingCount = bottles.filter(b=>b.customer_id===customerId && b.status==='keeping').length;
   if(keepingCount>0){
-    toast('このお客様には保管中のボトルがあります。先にボトルを廃棄・移行してください。','var(--rd)');
+    showBottleBlockSheet(customerId, c.name);
     return;
   }
   _deleteCustomerCtx = {customerId, storeId:c.store_id, onDone};
@@ -1077,7 +1104,8 @@ async function submitCustomerDelete(){
   const {data:freshBottles} = await sb.from('bottles').select('id').eq('customer_id',ctx.customerId).eq('status','keeping');
   if(freshBottles && freshBottles.length){
     closeOverlay('confirm-overlay');
-    toast('このお客様には保管中のボトルがあります。先にボトルを廃棄・移行してください。','var(--rd)');
+    const cc = customers.find(x=>x.id===ctx.customerId);
+    showBottleBlockSheet(ctx.customerId, cc?cc.name:'');
     return;
   }
   const c = customers.find(x=>x.id===ctx.customerId);
