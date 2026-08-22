@@ -272,6 +272,8 @@ nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,
   <div id="screen-bottle-form" class="screen"></div>
   <!-- 銘柄管理 -->
   <div id="screen-brands" class="screen"></div>
+  <!-- 銘柄別お客様一覧 -->
+  <div id="screen-brand-customers" class="screen"></div>
   <!-- スタッフ名簿 -->
   <div id="screen-staff" class="screen"></div>
   <!-- 廃棄履歴 -->
@@ -343,7 +345,7 @@ let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
 // デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
 // 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
-const APP_VERSION = 'kb-2026-08-22-3';
+const APP_VERSION = 'kb-2026-08-22-4';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -662,7 +664,7 @@ async function reloadStaffQuiet(){
 ============================================================ */
 const NAV_TITLES={home:'キープボトル管理',expiry:'保管期限管理',numbers:'空き番号確認',menu:'メニュー',
   customer:'お客様詳細','customer-form':'お客様登録・編集','bottle-form':'ボトル登録・編集',
-  brands:'ボトル銘柄管理',staff:'スタッフ名簿',disposals:'廃棄履歴',audit:'操作履歴',stores:'店舗管理',csv:'CSV出力',datamanage:'データ管理'};
+  brands:'ボトル銘柄管理','brand-customers':'銘柄別お客様一覧',staff:'スタッフ名簿',disposals:'廃棄履歴',audit:'操作履歴',stores:'店舗管理',csv:'CSV出力',datamanage:'データ管理'};
 
 function navTo(screen,params){
   if(curScreen) navStack.push({screen:curScreen,params:curParams});
@@ -692,7 +694,7 @@ function showScreen(screen,params){
   window.scrollTo(0,0);
   const renderers={home:renderHome,expiry:()=>renderExpiry(params),numbers:renderNumbers,menu:renderMenu,
     customer:()=>renderCustomerDetail(params),'customer-form':()=>renderCustomerForm(params),
-    'bottle-form':()=>renderBottleForm(params),brands:renderBrands,staff:renderStaffAdmin,
+    'bottle-form':()=>renderBottleForm(params),brands:renderBrands,'brand-customers':()=>renderBrandCustomers(params),staff:renderStaffAdmin,
     disposals:renderDisposals,audit:renderAudit,stores:renderStores,csv:renderCsv,datamanage:renderDataManage};
   (renderers[screen]||function(){})();
 }
@@ -1517,6 +1519,7 @@ function renderMenu(){
     <div class="section-title">店舗の管理</div>
     <div class="card" style="padding:0;">
       ${menuItem('🍾 ボトル銘柄管理',"navTo('brands')")}
+      ${menuItem('📋 銘柄別お客様一覧',"navTo('brand-customers')")}
       ${menuItem('🧑 スタッフ名簿',"navTo('staff')")}
       ${!admin? menuItem('🔁 スタッフ切替',"switchStaff()"):''}
       ${menuItem('🗑 廃棄履歴',"navTo('disposals')")}
@@ -1634,6 +1637,130 @@ async function reactivateBrand(id){
   toast('再表示しました');
   await reloadBrandsQuiet();
   renderBrands({tab:'active'});
+}
+
+/* ============================================================
+   銘柄別お客様一覧
+   （現在「保管中」のボトルだけを対象に、銘柄ごとに保有客をまとめる。
+    新しいテーブルは使わず、既存の customers / bottles / bottle_brands
+    キャッシュから毎回その場で集計する）
+============================================================ */
+// 五十音インデックス（お客様一覧の見出し用）。フリガナはひらがな統一済みの前提。
+const GOJUON_ROWS = [
+  {label:'あ行', chars:'あいうえおぁぃぅぇぉ'},
+  {label:'か行', chars:'かきくけこがぎぐげごゕゖ'},
+  {label:'さ行', chars:'さしすせそざじずぜぞ'},
+  {label:'た行', chars:'たちつてとだぢづでどっ'},
+  {label:'な行', chars:'なにぬねの'},
+  {label:'は行', chars:'はひふへほばびぶべぼぱぴぷぺぽ'},
+  {label:'ま行', chars:'まみむめも'},
+  {label:'や行', chars:'やゆよゃゅょ'},
+  {label:'ら行', chars:'らりるれろ'},
+  {label:'わ行', chars:'わをんゎ'},
+];
+const UNREGISTERED_KANA_LABEL = 'フリガナ未登録';
+function gojuonRowFor(kana){
+  if(!kana) return null;
+  const hira = katakanaToHiragana(String(kana).normalize('NFKC')).trim();
+  const ch = hira[0];
+  if(!ch) return null;
+  const row = GOJUON_ROWS.find(r=>r.chars.includes(ch));
+  return row ? row.label : null;
+}
+// 店舗内で「現在保管中のボトルが1本でもある銘柄」だけを一覧化（使用停止中でも保有者がいれば表示）
+function brandsInUseForStore(storeId){
+  const usedBrandIds = new Set(
+    bottles.filter(b=>b.store_id===storeId && b.status==='keeping').map(b=>b.brand_id)
+  );
+  return brands.filter(b=>b.store_id===storeId && usedBrandIds.has(b.id))
+    .sort((a,b)=>a.sort_order-b.sort_order);
+}
+// 指定銘柄・指定店舗の保有客（お客様ごとに番号をまとめる。廃棄済み・保管中以外は対象外）
+function brandHolders(storeId, brandId){
+  const map = new Map();
+  bottles.filter(b=>b.store_id===storeId && b.brand_id===brandId && b.status==='keeping')
+    .forEach(b=>{
+      if(!map.has(b.customer_id)) map.set(b.customer_id, []);
+      map.get(b.customer_id).push(b.number);
+    });
+  const rows=[];
+  map.forEach((numbers,customerId)=>{
+    const c = customers.find(x=>x.id===customerId);
+    if(!c) return; // キャッシュ不整合時は安全側で除外
+    numbers.sort((a,b)=>a-b);
+    rows.push({ customer:c, numbers, row: c.kana ? (gojuonRowFor(c.kana)||UNREGISTERED_KANA_LABEL) : UNREGISTERED_KANA_LABEL });
+  });
+  return rows;
+}
+function renderBrandCustomers(params){
+  if(params && params.brandId){ renderBrandCustomersDetail(params.brandId); return; }
+  const storeId = resolvedAdminStoreId();
+  const root = $('screen-brand-customers');
+  const q = root._q || '';
+  root.innerHTML = `
+    <div class="ph"><div class="ey">BRAND CUSTOMERS</div><h2>銘柄別お客様一覧</h2></div>
+    ${adminScopeBarHtml()}
+    <div class="search-wrap" style="margin-bottom:14px;">
+      <input type="text" class="search-input" style="font-size:16px;min-height:50px;padding:14px 44px 14px 16px;" id="bc-search" placeholder="🔍 銘柄名・よみがなで絞り込み" value="${esc(q)}" oninput="onBrandCustomersSearch()">
+      <button class="search-clear ${q?'show':''}" style="right:10px;" onclick="clearBrandCustomersSearch()">✕</button>
+    </div>
+    <div id="bc-list"></div>
+  `;
+  renderBrandCustomersList(storeId, q);
+}
+function renderBrandCustomersList(storeId, q){
+  const list = brandsInUseForStore(storeId);
+  const qn = normalizeForSearch(q), qt = tokenizeForSearch(q);
+  const filtered = q.trim()
+    ? list.filter(b=> fieldMatchScore(b.name,qn,qt)>0 || (b.reading && fieldMatchScore(b.reading,qn,qt)>0))
+    : list;
+  $('bc-list').innerHTML = filtered.length ? filtered.map(b=>{
+    const cnt = bottles.filter(x=>x.store_id===storeId && x.brand_id===b.id && x.status==='keeping').length;
+    return `<div class="li-row" style="cursor:pointer;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:16px 18px;margin-bottom:8px;" onclick="navTo('brand-customers',{brandId:'${b.id}'})">
+      <div class="ll"><div class="ln" style="font-size:17px;font-weight:700;">${esc(b.name)}</div>${b.reading?`<div class="ls">${esc(b.reading)}</div>`:''}</div>
+      <div style="color:var(--ac2);font-family:'DM Mono',monospace;font-size:15px;flex-shrink:0;">${cnt}本</div>
+    </div>`;
+  }).join('') : `<div class="empty-hint">${q?'一致する銘柄がありません':'現在保管中のボトルがありません'}</div>`;
+}
+function onBrandCustomersSearch(){
+  const root=$('screen-brand-customers');
+  const v = $('bc-search').value;
+  root._q = v;
+  const clearBtn = document.querySelector('#screen-brand-customers .search-clear');
+  if(clearBtn) clearBtn.classList.toggle('show', !!v);
+  renderBrandCustomersList(resolvedAdminStoreId(), v);
+}
+function clearBrandCustomersSearch(){
+  const root=$('screen-brand-customers');
+  root._q='';
+  $('bc-search').value='';
+  const clearBtn = document.querySelector('#screen-brand-customers .search-clear');
+  if(clearBtn) clearBtn.classList.remove('show');
+  renderBrandCustomersList(resolvedAdminStoreId(), '');
+  $('bc-search').focus();
+}
+function renderBrandCustomersDetail(brandId){
+  const brand = brands.find(b=>b.id===brandId);
+  if(!brand){ toast('銘柄が見つかりません','var(--rd)'); goBack(); return; }
+  if(!isAdmin() && brand.store_id!==myProfile.store_id){ toast('この銘柄は表示できません','var(--rd)'); goBack(); return; }
+  const holders = brandHolders(brand.store_id, brandId);
+  const grouped = {};
+  holders.forEach(h=>{ (grouped[h.row]=grouped[h.row]||[]).push(h); });
+  const rowOrder = GOJUON_ROWS.map(r=>r.label).concat([UNREGISTERED_KANA_LABEL]);
+  const sections = rowOrder.map(label=>{
+    const items = (grouped[label]||[]).sort((a,b)=>(a.customer.kana||'').localeCompare(b.customer.kana||'','ja'));
+    if(!items.length) return '';
+    return `<div class="section-title">${esc(label)}</div>` + items.map(h=>`
+      <div class="li-row" style="cursor:pointer;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:8px;" onclick="navTo('customer',{id:'${h.customer.id}'})">
+        <div class="ll"><div class="ln">${esc(h.customer.name)} 様</div></div>
+        <div style="font-family:'DM Mono',monospace;color:var(--ac2);font-size:15px;flex-shrink:0;">${h.numbers.map(n=>'No.'+n).join(' / ')}</div>
+      </div>`).join('');
+  }).join('');
+  $('screen-brand-customers').innerHTML = `
+    <div class="ph"><div class="ey">${esc(brand.reading||'BRAND')}</div><h2>${esc(brand.name)}</h2></div>
+    <div style="color:var(--mu);font-size:13px;margin-bottom:14px;">保管中のお客様 ${holders.length}名</div>
+    ${holders.length ? sections : `<div class="empty-hint">現在このボトルを保管しているお客様はいません</div>`}
+  `;
 }
 
 /* ============================================================
