@@ -278,7 +278,7 @@ nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,
   <div id="screen-datamanage" class="screen"></div>
 
   <nav class="bn">
-    <button class="bn-btn active" data-nav="home" onclick="navTo('home')"><div class="bi">🏠</div>ホーム</button>
+    <button class="bn-btn active" data-nav="home" onclick="goHome()"><div class="bi">🏠</div>ホーム</button>
     <button class="bn-btn" data-nav="expiry" onclick="navTo('expiry')"><div class="bi">⏰</div>期限管理</button>
     <button class="bn-btn" data-nav="numbers" onclick="navTo('numbers')"><div class="bi">🔢</div>空き番号</button>
     <button class="bn-btn" data-nav="menu" onclick="navTo('menu')"><div class="bi">☰</div>メニュー</button>
@@ -589,6 +589,15 @@ function goBack(){
   const prev=navStack.pop();
   if(prev) showScreen(prev.screen,prev.params);
   else showScreen('home');
+}
+// 下部ナビゲーションの【ホーム】専用：どの画面からでも必ずダッシュボードへ戻す固定動作。
+// ブラウザの「戻る」(goBack)とは異なり、履歴を辿らず・検索状態や開いているモーダルもすべてリセットする。
+function goHome(){
+  document.querySelectorAll('.overlay.show').forEach(el=>el.classList.remove('show'));
+  const homeRoot = $('screen-home');
+  if(homeRoot) homeRoot._q = ''; // 前回の検索文字・検索結果をクリア
+  navStack = [];
+  showScreen('home');
 }
 function showScreen(screen,params){
   curScreen=screen; curParams=params;
