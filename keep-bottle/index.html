@@ -160,6 +160,16 @@ tr:last-child td{border-bottom:none;}
 .kv .kk{color:var(--mu);}
 .kv .kvv{font-weight:600;text-align:right;}
 
+/* ── SEARCHABLE BRAND COMBO ── */
+.combo{position:relative;}
+.combo-list{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--sf2);border:1px solid var(--bd);border-radius:10px;max-height:240px;overflow-y:auto;z-index:50;box-shadow:0 8px 20px rgba(0,0,0,.4);display:none;}
+.combo-list.show{display:block;}
+.combo-item{padding:13px 14px;font-size:15px;cursor:pointer;border-bottom:1px solid rgba(39,39,56,.6);min-height:44px;display:flex;align-items:center;}
+.combo-item:last-child{border-bottom:none;}
+.combo-item:active,.combo-item.hi{background:var(--acd);color:var(--ac);}
+.combo-empty{padding:13px 14px;font-size:13px;color:var(--mu);}
+.combo-selected{border-color:var(--ac) !important;}
+
 /* ── STAFF PICKER ── */
 .staff-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:18px 0;}
 .staff-btn{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:20px 10px;font-size:17px;font-weight:700;color:var(--tx);cursor:pointer;text-align:center;min-height:64px;}
@@ -497,7 +507,7 @@ async function loadScopeData(){
   const ids = isAdmin() ? scopeStoreIds : scopeStoreIds; // admin: 全店舗キャッシュ、表示時にフィルタ
   const [staffRes, brandRes, custRes, bottleRes] = await Promise.all([
     sb.from('staff_members').select('*').in('store_id',ids).order('name'),
-    sb.from('bottle_brands').select('*').in('store_id',ids).is('deleted_at',null).order('sort_order'),
+    sb.from('bottle_brands').select('*').in('store_id',ids).order('sort_order'), // 非表示分も含めて取得（銘柄管理画面の再表示用）
     sb.from('customers').select('*').in('store_id',ids).is('deleted_at',null).order('name'),
     sb.from('v_bottles').select('*').in('store_id',ids)
   ]);
@@ -537,7 +547,7 @@ async function reloadBottlesQuiet(){
   if(curScreen==='customer') renderCustomerDetail(curParams);
 }
 async function reloadBrandsQuiet(){
-  const {data} = await sb.from('bottle_brands').select('*').in('store_id',scopeStoreIds).is('deleted_at',null).order('sort_order');
+  const {data} = await sb.from('bottle_brands').select('*').in('store_id',scopeStoreIds).order('sort_order');
   brands = data||brands;
 }
 async function reloadStaffQuiet(){
@@ -550,7 +560,7 @@ async function reloadStaffQuiet(){
 ============================================================ */
 const NAV_TITLES={home:'キープボトル管理',expiry:'保管期限管理',numbers:'空き番号確認',menu:'メニュー',
   customer:'お客様詳細','customer-form':'お客様登録・編集','bottle-form':'ボトル登録・編集',
-  brands:'銘柄管理',staff:'スタッフ名簿',disposals:'廃棄履歴',audit:'操作履歴',stores:'店舗管理',csv:'CSV出力',datamanage:'データ管理'};
+  brands:'ボトル銘柄管理',staff:'スタッフ名簿',disposals:'廃棄履歴',audit:'操作履歴',stores:'店舗管理',csv:'CSV出力',datamanage:'データ管理'};
 
 function navTo(screen,params){
   if(curScreen) navStack.push({screen:curScreen,params:curParams});
@@ -901,7 +911,13 @@ async function submitCustomerEdit(id){
 function bottleFieldsHtml(prefix){
   return `
     <div class="field"><label>銘柄<span class="req">必須</span></label>
-      <select id="${prefix}-brand" onchange="onBrandChange('${prefix}')"></select>
+      <div class="combo">
+        <input type="text" id="${prefix}-brand-text" placeholder="銘柄名で検索・選択" autocomplete="off"
+          oninput="onBrandSearchInput('${prefix}')" onfocus="onBrandSearchInput('${prefix}')"
+          onblur="setTimeout(()=>closeBrandList('${prefix}'),150)">
+        <input type="hidden" id="${prefix}-brand" value="">
+        <div class="combo-list" id="${prefix}-brand-list"></div>
+      </div>
     </div>
     <div class="field"><label>管理番号<span class="req">必須</span></label>
       <input type="number" id="${prefix}-number" inputmode="numeric" placeholder="例）12">
@@ -911,15 +927,40 @@ function bottleFieldsHtml(prefix){
   `;
 }
 const bfStoreMap={};
+const bfBrandList={};
 function initBottleFields(prefix,storeId){
-  const sel=$(prefix+'-brand');
-  if(!sel) return;
+  const hid=$(prefix+'-brand');
+  if(!hid) return;
   bfStoreMap[prefix] = storeId || myProfile.store_id || (allStores[0]&&allStores[0].id);
-  const list = brands.filter(b=>b.store_id===bfStoreMap[prefix]);
-  sel.innerHTML = `<option value="">選択してください</option>` + list.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  bfBrandList[prefix] = brands.filter(b=>b.store_id===bfStoreMap[prefix] && !b.deleted_at).sort((a,b)=>a.sort_order-b.sort_order);
+  hid.value='';
+  $(prefix+'-brand-text').value='';
   $(prefix+'-number').value='';
   $(prefix+'-suggest').textContent='';
+  closeBrandList(prefix);
   $(prefix+'-number').addEventListener('input',()=>validateNumberField(prefix));
+}
+function onBrandSearchInput(prefix){
+  const q = $(prefix+'-brand-text').value.trim().toLowerCase();
+  $(prefix+'-brand').value=''; // 一覧から選び直すまでは未確定にする
+  const list = (bfBrandList[prefix]||[]).filter(b=>!q || b.name.toLowerCase().includes(q));
+  const box=$(prefix+'-brand-list');
+  box.innerHTML = list.length
+    ? list.map(b=>`<div class="combo-item" onmousedown="pickBrand('${prefix}','${b.id}')">${esc(b.name)}</div>`).join('')
+    : `<div class="combo-empty">一致する銘柄がありません。メニューの「ボトル銘柄管理」から追加できます。</div>`;
+  box.classList.add('show');
+}
+function closeBrandList(prefix){
+  const box=$(prefix+'-brand-list');
+  if(box) box.classList.remove('show');
+}
+function pickBrand(prefix,brandId){
+  const b = (bfBrandList[prefix]||[]).find(x=>x.id===brandId);
+  if(!b) return;
+  $(prefix+'-brand').value=b.id;
+  $(prefix+'-brand-text').value=b.name;
+  closeBrandList(prefix);
+  onBrandChange(prefix);
 }
 function usedNumbersFor(storeId,brandId){
   return bottles.filter(b=>b.store_id===storeId && b.brand_id===brandId && b.status==='keeping').map(b=>b.number).sort((a,b)=>a-b);
@@ -930,21 +971,21 @@ function suggestNumber(used){
   return Math.max(...used)+1;
 }
 function onBrandChange(prefix){
-  const sel=$(prefix+'-brand');
+  const brandId = $(prefix+'-brand').value;
   const storeId = bfStoreMap[prefix];
-  const used = usedNumbersFor(storeId, sel.value);
+  const used = usedNumbersFor(storeId, brandId);
   const s = suggestNumber(used);
-  $(prefix+'-suggest').textContent = sel.value ? `おすすめ No.${s}（使用中: ${used.join('、')||'なし'}）` : '';
+  $(prefix+'-suggest').textContent = brandId ? `おすすめ No.${s}（使用中: ${used.join('、')||'なし'}）` : '';
   if(!$(prefix+'-number').value) $(prefix+'-number').value=s;
   validateNumberField(prefix);
 }
 function validateNumberField(prefix){
-  const sel=$(prefix+'-brand');
+  const brandId=$(prefix+'-brand').value;
   const numEl=$(prefix+'-number');
   const hint=$(prefix+'-suggest');
-  if(!sel.value || !numEl.value) return true;
+  if(!brandId || !numEl.value) return true;
   const storeId = bfStoreMap[prefix];
-  const used = usedNumbersFor(storeId, sel.value);
+  const used = usedNumbersFor(storeId, brandId);
   const n = parseInt(numEl.value,10);
   if(used.includes(n)){
     hint.innerHTML = `<span style="color:var(--rd);">この番号は現在使用中です</span>`;
@@ -954,9 +995,10 @@ function validateNumberField(prefix){
   return true;
 }
 function readBottleFields(prefix){
-  const sel=$(prefix+'-brand'), numEl=$(prefix+'-number'), dateEl=$(prefix+'-date');
-  if(!sel||!sel.value||!numEl.value) return null;
-  return {brandId:sel.value, brandName:sel.options[sel.selectedIndex].textContent, number:parseInt(numEl.value,10), registeredAt:dateEl.value||jstTodayStr()};
+  const brandId=$(prefix+'-brand').value, numEl=$(prefix+'-number'), dateEl=$(prefix+'-date');
+  if(!brandId||!numEl.value) return null;
+  const b = (bfBrandList[prefix]||[]).find(x=>x.id===brandId);
+  return {brandId, brandName: b?b.name:'', number:parseInt(numEl.value,10), registeredAt:dateEl.value||jstTodayStr()};
 }
 async function createBottleRow(customerId, storeId, fields){
   if(!validateNumberFieldRaw(storeId,fields.brandId,fields.number)){
@@ -1187,7 +1229,7 @@ function expiryRowHtml(b,tab){
 ============================================================ */
 function renderNumbers(){
   const storeId = resolvedAdminStoreId();
-  const storeBrands = brands.filter(b=>b.store_id===storeId);
+  const storeBrands = brands.filter(b=>b.store_id===storeId && !b.deleted_at);
   $('screen-numbers').innerHTML = `
     <div class="ph"><div class="ey">NUMBERS</div><h2>空き番号確認</h2></div>
     ${adminScopeBarHtml()}
@@ -1214,7 +1256,7 @@ function renderMenu(){
     <div class="ph"><div class="ey">MENU</div><h2>メニュー</h2></div>
     <div class="section-title">店舗の管理</div>
     <div class="card" style="padding:0;">
-      ${menuItem('🍾 銘柄管理',"navTo('brands')")}
+      ${menuItem('🍾 ボトル銘柄管理',"navTo('brands')")}
       ${menuItem('🧑 スタッフ名簿',"navTo('staff')")}
       ${!admin? menuItem('🔁 スタッフ切替',"switchStaff()"):''}
       ${menuItem('🗑 廃棄履歴',"navTo('disposals')")}
@@ -1237,52 +1279,94 @@ function menuItem(label,onclick){
 /* ============================================================
    銘柄管理
 ============================================================ */
-function renderBrands(){
+function normBrandName(s){ return String(s||'').trim().replace(/\s+/g,' ').toLowerCase(); }
+function renderBrands(params){
   const storeId = resolvedAdminStoreId();
-  const list = brands.filter(b=>b.store_id===storeId);
+  const tab = (params&&params.tab) || $('screen-brands')._tab || 'active';
+  $('screen-brands')._tab = tab;
+  const all = brands.filter(b=>b.store_id===storeId);
+  const activeList = all.filter(b=>!b.deleted_at).sort((a,b)=>a.sort_order-b.sort_order);
+  const hiddenList = all.filter(b=>b.deleted_at).sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+  const list = tab==='active' ? activeList : hiddenList;
   $('screen-brands').innerHTML = `
-    <div class="ph"><div class="ey">BRANDS</div><h2>銘柄管理</h2></div>
+    <div class="ph"><div class="ey">BRANDS</div><h2>ボトル銘柄管理</h2></div>
     ${adminScopeBarHtml()}
     <div class="card">
-      <div class="ct">銘柄を追加</div>
+      <div class="ct">＋ 新しい銘柄を追加</div>
       <div class="btn-row">
         <input type="text" id="brand-new-name" placeholder="銘柄名">
         <button class="be" style="min-width:70px;" onclick="addBrand('${storeId}')">追加</button>
       </div>
     </div>
-    ${list.map(b=>`<div class="li-row" style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:8px;">
-      <div class="ll"><input type="text" value="${esc(b.name)}" id="brand-name-${b.id}" style="min-height:40px;padding:8px 10px;"></div>
-      <div class="btn-row" style="flex:0 0 auto;gap:6px;">
-        <button class="be" onclick="renameBrand('${b.id}')">保存</button>
-        <button class="bd2" onclick="deleteBrand('${b.id}')">削除</button>
-      </div>
-    </div>`).join('')}
+    <div class="tabbar">
+      <div class="tb ${tab==='active'?'active':''}" onclick="renderBrands({tab:'active'})">使用中 ${activeList.length}件</div>
+      <div class="tb ${tab==='hidden'?'active':''}" onclick="renderBrands({tab:'hidden'})">非表示 ${hiddenList.length}件</div>
+    </div>
+    ${list.length ? list.map(b=>`<div class="li-row" style="background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:8px;">
+      ${tab==='active'
+        ? `<div class="ll"><input type="text" value="${esc(b.name)}" id="brand-name-${b.id}" style="min-height:40px;padding:8px 10px;"></div>
+           <div class="btn-row" style="flex:0 0 auto;gap:6px;">
+             <button class="be" onclick="renameBrand('${b.id}')">保存</button>
+             <button class="bd2" onclick="deactivateBrand('${b.id}')">使用停止</button>
+           </div>`
+        : `<div class="ll"><div class="ln">${esc(b.name)}</div><div class="ls">非表示中（過去のボトル履歴には名前が残ります）</div></div>
+           <button class="be" onclick="reactivateBrand('${b.id}')">再表示する</button>`
+      }
+    </div>`).join('') : `<div class="empty-hint">${tab==='active'?'銘柄がありません':'非表示の銘柄はありません'}</div>`}
   `;
 }
 async function addBrand(storeId){
-  const name=$('brand-new-name').value.trim();
-  if(!name) return;
-  const {error} = await sb.from('bottle_brands').insert({store_id:storeId,name,sort_order:brands.filter(b=>b.store_id===storeId).length+1});
+  const nameEl=$('brand-new-name');
+  const name=nameEl.value.trim();
+  if(!name){ toast('銘柄名を入力してください','var(--rd)'); return; }
+  const norm = normBrandName(name);
+  const existing = brands.filter(b=>b.store_id===storeId);
+  const activeDup = existing.find(b=>!b.deleted_at && normBrandName(b.name)===norm);
+  if(activeDup){ toast('この銘柄はすでに登録されています','var(--rd)'); return; }
+  const hiddenDup = existing.find(b=>b.deleted_at && normBrandName(b.name)===norm);
+  if(hiddenDup){
+    showConfirm('非表示の銘柄があります', `「${esc(hiddenDup.name)}」は非表示になっています。新しく登録する代わりに再表示しますか？`, async ()=>{
+      await reactivateBrand(hiddenDup.id);
+      nameEl.value='';
+    });
+    return;
+  }
+  const {error} = await sb.from('bottle_brands').insert({store_id:storeId,name,sort_order:existing.filter(b=>!b.deleted_at).length+1});
   if(error){ toast('この銘柄はすでに登録されています','var(--rd)'); return; }
   toast('銘柄を追加しました');
+  nameEl.value='';
   await reloadBrandsQuiet();
-  renderBrands();
+  renderBrands({tab:'active'});
 }
 async function renameBrand(id){
   const name=$('brand-name-'+id).value.trim();
-  if(!name) return;
+  if(!name){ toast('銘柄名を入力してください','var(--rd)'); return; }
+  const b = brands.find(x=>x.id===id);
+  const norm = normBrandName(name);
+  const dup = brands.find(x=>x.id!==id && x.store_id===b.store_id && !x.deleted_at && normBrandName(x.name)===norm);
+  if(dup){ toast('この銘柄はすでに登録されています','var(--rd)'); return; }
   const {error} = await sb.from('bottle_brands').update({name,updated_at:new Date().toISOString()}).eq('id',id);
   if(error){ toast('変更できませんでした','var(--rd)'); return; }
   toast('変更しました');
   await reloadBrandsQuiet();
-  renderBrands();
+  renderBrands({tab:'active'});
 }
-async function deleteBrand(id){
-  const {error} = await sb.from('bottle_brands').update({deleted_at:new Date().toISOString()}).eq('id',id);
-  if(error){ toast('削除できませんでした','var(--rd)'); return; }
-  toast('削除しました');
+async function deactivateBrand(id){
+  const b = brands.find(x=>x.id===id);
+  showConfirm('この銘柄を使用停止にしますか？', `「${esc(b.name)}」を新規登録の選択肢から非表示にします。過去のボトル履歴の銘柄名は消えません。あとから「非表示」タブから再表示できます。`, async ()=>{
+    const {error} = await sb.from('bottle_brands').update({deleted_at:new Date().toISOString()}).eq('id',id);
+    if(error){ toast('操作できませんでした','var(--rd)'); return; }
+    toast('使用停止にしました');
+    await reloadBrandsQuiet();
+    renderBrands({tab:'active'});
+  });
+}
+async function reactivateBrand(id){
+  const {error} = await sb.from('bottle_brands').update({deleted_at:null,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){ toast('この名前の銘柄がすでに使用中のため再表示できませんでした','var(--rd)'); return; }
+  toast('再表示しました');
   await reloadBrandsQuiet();
-  renderBrands();
+  renderBrands({tab:'active'});
 }
 
 /* ============================================================
