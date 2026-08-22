@@ -341,6 +341,9 @@ let allStores=[], scopeStoreIds=[];
 let staffMembers=[], brands=[], customers=[], bottles=[];
 let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
+// デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
+// 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
+const APP_VERSION = 'kb-2026-08-22-3';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -489,7 +492,11 @@ function isAdmin(){ return myProfile && myProfile.role==='admin'; }
 window.addEventListener('DOMContentLoaded', init);
 async function init(){
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    // updateViaCache:'none' … sw.js 自体の更新確認を、ブラウザのHTTPキャッシュに邪魔されず
+    // 必ずネットワークへ問い合わせるようにする（実機で修正が反映されにくい問題への対策）
+    navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'}).then(reg=>{
+      reg.update().catch(()=>{});
+    }).catch(()=>{});
   }
   const {data:{session:s}} = await sb.auth.getSession();
   if(s){ session=s; await afterLogin(); }
@@ -1523,6 +1530,7 @@ function renderMenu(){
       ${menuItem('🗄 データ管理（完全削除）',"navTo('datamanage')")}
     </div>`:''}
     <button class="btn-s" style="margin-top:24px;color:var(--rd);border-color:rgba(224,108,117,.3);" onclick="logout()">ログアウト</button>
+    <div style="text-align:center;color:var(--mu);font-size:11px;margin-top:18px;">バージョン: ${APP_VERSION}</div>
   `;
 }
 function menuItem(label,onclick){

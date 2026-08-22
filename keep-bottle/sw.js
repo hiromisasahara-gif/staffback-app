@@ -2,7 +2,7 @@
 // オフラインでも起動できるように、アプリの土台ファイルを保存(キャッシュ)します。
 // データそのもの(お客様・ボトル情報)はキャッシュしません。データはSupabaseに保存されます。
 
-const CACHE_VERSION = 'keep-bottle-v2';
+const CACHE_VERSION = 'keep-bottle-v3';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -39,8 +39,10 @@ self.addEventListener('fetch', (event) => {
   const isNavigation = req.mode === 'navigate' || (req.destination === 'document');
 
   if (isNavigation) {
+    // cache:'no-store' … ブラウザやCDNのHTTPキャッシュを一切信用せず、
+    // 常にネットワークから最新のHTMLを取りに行く（実機で修正が反映されにくい問題への対策）。
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE_VERSION).then((c) => c.put('./index.html', copy)).catch(() => {});
