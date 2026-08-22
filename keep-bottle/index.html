@@ -366,8 +366,11 @@ function normalizeKanaText(str){
 // 検索比較専用：大文字/小文字・全角/半角・ひらがな/カタカナ・空白の違いをすべて吸収する
 function normalizeForSearch(str){
   if(!str) return '';
-  const hira = katakanaToHiragana(String(str).normalize('NFKC'));
-  return hira.toLowerCase().trim().replace(/[\s　]+/g,'');
+  let s = katakanaToHiragana(String(str).normalize('NFKC')).toLowerCase();
+  s = s.replace(/[。、,.!?！？…]+/g,''); // 音声認識結果に付きやすい句読点等を除去
+  s = s.trim().replace(/[\s　]+/g,''); // 前後・連続する空白を除去
+  s = s.replace(/(さん|様)$/,''); // 末尾の敬称（さん／様）を除去
+  return s;
 }
 function toast(msg,color){
   const t=$('toast');
