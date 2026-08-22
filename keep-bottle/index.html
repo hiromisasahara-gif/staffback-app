@@ -399,7 +399,7 @@ let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
 // デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
 // 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
-const APP_VERSION = 'kb-2026-08-22-5';
+const APP_VERSION = 'kb-2026-08-22-6';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -1163,10 +1163,12 @@ async function doCreateCustomer(staff){
   await logAudit('customer_create',{customer_id:data.id,after:payload,store_id:payload.store_id,staff});
 
   const nf = readBottleFields('nf');
+  let bottleOk = true;
   if(nf && nf.brandId && nf.number){
-    await createBottleRow(data.id, payload.store_id, nf, staff);
+    const createdBottle = await createBottleRow(data.id, payload.store_id, nf, staff, 'nf');
+    bottleOk = !!createdBottle;
   }
-  toast(`${data.name}様を登録しました`);
+  toast(bottleOk ? `${data.name}様を登録しました` : `${data.name}様を登録しました（ボトルは番号をご確認のうえ、お客様詳細から改めて追加してください）`, bottleOk?undefined:'var(--rd)');
   await loadScopeData();
   navStack=[]; showScreen('customer',{id:data.id});
 }
@@ -1275,7 +1277,8 @@ function validateNumberField(prefix){
   const used = usedNumbersFor(storeId, brandId);
   const n = parseInt(numEl.value,10);
   if(used.includes(n)){
-    hint.innerHTML = `<span style="color:var(--rd);">この番号は現在使用中です</span>`;
+    const b = (bfBrandList[prefix]||[]).find(x=>x.id===brandId);
+    hint.innerHTML = `<span style="color:var(--rd);">${esc(b?b.name:'この銘柄')} No.${n} は現在使用中です。別の番号を選択してください。</span>`;
     return false;
   }
   hint.innerHTML = `おすすめ No.${suggestNumber(used)}（使用中: ${used.join('、')||'なし'}）`;
@@ -1287,9 +1290,28 @@ function readBottleFields(prefix){
   const b = (bfBrandList[prefix]||[]).find(x=>x.id===brandId);
   return {brandId, brandName: b?b.name:'', number:parseInt(numEl.value,10), registeredAt:dateEl.value||jstTodayStr()};
 }
-async function createBottleRow(customerId, storeId, fields, staff){
-  if(!validateNumberFieldRaw(storeId,fields.brandId,fields.number)){
-    toast('この番号は現在使用中のため登録できませんでした','var(--rd)');
+// 保存直前に、その店舗・銘柄の「現在保管中」番号をSupabaseへ直接問い合わせて最新化する。
+// 複数端末からの同時登録で、画面表示後に他端末が同じ番号を使ってしまうケースへの対策。
+// 空き番号画面(usedNumbersFor)と同じ「status='keeping'のみを使用中とみなす」判定に揃えてある。
+async function fetchFreshUsedNumbers(storeId, brandId){
+  const {data,error} = await sb.from('bottles').select('number').eq('store_id',storeId).eq('brand_id',brandId).eq('status','keeping');
+  if(error) return null; // 確認できなかった場合はnullを返し、呼び出し側はDBのユニーク制約に判定を委ねる
+  return (data||[]).map(r=>r.number);
+}
+// prefix を渡すと、番号が競合した際にそのフォームの番号欄・ヒント表示へ
+// 最新のおすすめ番号を自動で反映する（新規登録フォーム='nf'、ボトル追加フォーム='bf'）
+function refillNumberSuggestion(prefix, used){
+  if(!prefix) return;
+  const s = suggestNumber(used);
+  const numEl=$(prefix+'-number'), hintEl=$(prefix+'-suggest');
+  if(numEl) numEl.value = s;
+  if(hintEl) hintEl.innerHTML = `おすすめ No.${s}（使用中: ${used.join('、')||'なし'}）`;
+}
+async function createBottleRow(customerId, storeId, fields, staff, prefix){
+  const freshUsed = await fetchFreshUsedNumbers(storeId, fields.brandId);
+  if(freshUsed && freshUsed.includes(fields.number)){
+    toast('この番号は先ほど使用されました。新しい空き番号を取得しました。','var(--rd)');
+    refillNumberSuggestion(prefix, freshUsed);
     return null;
   }
   const payload={
@@ -1299,8 +1321,13 @@ async function createBottleRow(customerId, storeId, fields, staff){
   };
   const {data,error} = await sb.from('bottles').insert(payload).select().single();
   if(error){
-    if(error.code==='23505') toast('この番号は現在使用中です','var(--rd)');
-    else toast('ボトルを登録できませんでした','var(--rd)');
+    if(error.code==='23505'){
+      toast(`${fields.brandName} No.${fields.number} は現在使用中です。別の番号を選択してください。`,'var(--rd)');
+      const freshUsed2 = await fetchFreshUsedNumbers(storeId, fields.brandId);
+      if(freshUsed2) refillNumberSuggestion(prefix, freshUsed2);
+    } else {
+      toast('ボトルを登録できませんでした','var(--rd)');
+    }
     return null;
   }
   await sb.from('bottle_history').insert({bottle_id:data.id,customer_id:customerId,store_id:storeId,event_type:'registered',after:payload,staff_member_id:staff?staff.id:null,staff_member_name:staff?staff.name:null,created_by:session.user.id});
@@ -1382,7 +1409,7 @@ async function submitBottleNew(customerId){
   const customer = customers.find(x=>x.id===customerId);
   const staff = readStaffField('bf', customer.store_id);
   if(!staff) return;
-  const created = await createBottleRow(customerId, customer.store_id, fields, staff);
+  const created = await createBottleRow(customerId, customer.store_id, fields, staff, 'bf');
   if(created){ toast('ボトルを登録しました'); await loadScopeData(); goBack(); showScreen('customer',{id:customerId}); }
 }
 async function submitExpiryChange(bottleId){
