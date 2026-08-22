@@ -721,7 +721,7 @@ function setAdminScope(id){
   adminStoreFilter=id;
   showScreen(curScreen,curParams);
 }
-// 銘柄管理・空き番号・スタッフ名簿は「1店舗」を前提にした画面のため、
+// 銘柄管理・空き番号・銘柄別お客様一覧は「1店舗」を前提にした画面のため、
 // 管理者が「全店舗」を選んでいる場合は自動的に最初の店舗に絞り込みます
 function resolvedAdminStoreId(){
   if(isAdmin() && adminStoreFilter==='all'){ adminStoreFilter = allStores[0]?allStores[0].id:'all'; }
