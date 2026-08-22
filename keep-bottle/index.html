@@ -342,6 +342,25 @@ let disposeCtx=null, visitCtx=null;
 ============================================================ */
 function $(id){return document.getElementById(id);}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* ── フリガナ正規化（ひらがな統一・ひらがな/カタカナ/半角カタカナを同一視した検索）──
+   .normalize('NFKC') で半角カタカナ→全角カタカナ・全角英数記号の統一まで済ませ、
+   そのあとカタカナの文字コードを -0x60 してひらがなへ変換する。 */
+function katakanaToHiragana(str){
+  return String(str||'').replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60));
+}
+// フリガナ欄の保存用：ひらがなに統一し、前後の空白・連続する空白を整える（読みやすさのため単一の空白は残す）
+function normalizeKanaText(str){
+  if(!str) return '';
+  const hira = katakanaToHiragana(String(str).normalize('NFKC'));
+  return hira.trim().replace(/[\s　]+/g,' ');
+}
+// 検索比較専用：大文字/小文字・全角/半角・ひらがな/カタカナ・空白の違いをすべて吸収する
+function normalizeForSearch(str){
+  if(!str) return '';
+  const hira = katakanaToHiragana(String(str).normalize('NFKC'));
+  return hira.toLowerCase().trim().replace(/[\s　]+/g,'');
+}
 function toast(msg,color){
   const t=$('toast');
   t.textContent=msg;
@@ -623,7 +642,7 @@ function onSearchInput(){
   const q=$('search-box').value;
   $('screen-home')._q=q;
   document.querySelector('.search-clear').classList.toggle('show', !!q);
-  if(!q){ renderDashboard(); return; }
+  if(!q.trim()){ renderDashboard(); return; }
   renderSearchResults(q);
 }
 function clearSearch(){
@@ -641,13 +660,13 @@ function scopedBottles(){
   return bottles.filter(b=>ids.includes(b.store_id));
 }
 function renderSearchResults(q){
-  const query=q.trim().toLowerCase();
+  const query=normalizeForSearch(q);
   const custs=scopedCustomers();
   const bts=scopedBottles();
   const matched = custs.filter(c=>{
-    if([c.name,c.kana,c.company,c.receipt_name].some(v=>v&&v.toLowerCase().includes(query))) return true;
+    if([c.name,c.kana,c.company,c.receipt_name].some(v=>v&&normalizeForSearch(v).includes(query))) return true;
     const cb = bts.filter(b=>b.customer_id===c.id);
-    return cb.some(b=> (b.brand_name&&b.brand_name.toLowerCase().includes(query)) || String(b.number).includes(query));
+    return cb.some(b=> (b.brand_name&&normalizeForSearch(b.brand_name).includes(query)) || String(b.number).includes(query));
   }).slice(0,60);
 
   const body=$('home-body');
@@ -806,7 +825,7 @@ function renderCustomerForm(params){
         <select id="cf-store" onchange="initBottleFields('nf', this.value)">${allStores.map(s=>`<option value="${s.id}" ${s.id===defaultStoreId?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div>`:''}
       <div class="field"><label>お客様名<span class="req">必須</span></label><input type="text" id="cf-name" value="${esc(c?c.name:'')}" placeholder="例）田中 太郎"></div>
-      <div class="field"><label>フリガナ</label><input type="text" id="cf-kana" value="${esc(c?c.kana:'')}" placeholder="例）タナカ タロウ"></div>
+      <div class="field"><label>フリガナ</label><input type="text" id="cf-kana" value="${esc(c?c.kana:'')}" placeholder="例）たなか たろう"><div class="hint">カタカナで入力しても、保存時に自動でひらがなに変換されます</div></div>
       <div class="field"><label>会社名</label><input type="text" id="cf-company" value="${esc(c?c.company:'')}"></div>
       <div class="field"><label>領収書名</label><input type="text" id="cf-receipt" value="${esc(c?c.receipt_name:'')}"></div>
       <div class="field"><label>電話番号</label><input type="tel" id="cf-phone" value="${esc(c?c.phone:'')}"></div>
@@ -866,7 +885,7 @@ async function doCreateCustomer(){
   const payload={
     store_id: targetStoreIdForNewCustomer(),
     name: $('cf-name').value.trim(),
-    kana: $('cf-kana').value.trim()||null,
+    kana: normalizeKanaText($('cf-kana').value)||null,
     company: $('cf-company').value.trim()||null,
     receipt_name: $('cf-receipt').value.trim()||null,
     phone: $('cf-phone').value.trim()||null,
@@ -889,7 +908,7 @@ async function submitCustomerEdit(id){
   const before = customers.find(x=>x.id===id);
   const payload={
     name: $('cf-name').value.trim(),
-    kana: $('cf-kana').value.trim()||null,
+    kana: normalizeKanaText($('cf-kana').value)||null,
     company: $('cf-company').value.trim()||null,
     receipt_name: $('cf-receipt').value.trim()||null,
     phone: $('cf-phone').value.trim()||null,
