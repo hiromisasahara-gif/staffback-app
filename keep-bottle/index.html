@@ -229,25 +229,6 @@ nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,
   </div>
 </div>
 
-<!-- ══════════ スタッフ選択画面 ══════════ -->
-<div id="screen-staffpick" class="screen full" style="padding:0;">
-  <div class="login-wrap">
-    <div class="login-logo">
-      <div class="lg1">STAFF</div>
-      <div class="lg2">あなたのお名前は？</div>
-    </div>
-    <div class="hint" style="text-align:center;margin-bottom:6px;">来店登録・廃棄記録などに使われます</div>
-    <div class="staff-grid" id="staffpick-grid"></div>
-    <div class="field" style="margin-top:6px;">
-      <label>名簿にない場合は追加できます</label>
-      <div class="btn-row">
-        <input type="text" id="staffpick-newname" placeholder="スタッフ名">
-        <button class="be" style="min-width:80px;" onclick="addStaffAndPick()">追加</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ══════════ アプリ本体 ══════════ -->
 <div id="app-root" style="display:none;">
   <div class="topbar">
@@ -329,6 +310,14 @@ nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,
   </div>
 </div>
 
+<!-- 担当者クイック選択シート（来店登録など、1タップで選ぶための共通部品） -->
+<div class="overlay" id="staffpick-overlay">
+  <div class="sheet">
+    <h3 id="staffpick-title">担当者を選択</h3>
+    <div id="staffpick-body"></div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    設定・状態
@@ -336,16 +325,81 @@ nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,
 const SUPABASE_URL='https://gbjqyjfocjohppivfjns.supabase.co';
 const SUPABASE_ANON_KEY='sb_publishable_64o_B0D_sjfh6vxm8PWtDg_6H_QRbTH';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
-const STAFF_KEY='kb_staff_v1';
+// 「今ログインしているのが誰か」というスタッフの概念は廃止。
+// 代わりに、登録・変更・廃棄など記録を残す操作のたびに、その場で担当者を選ぶ。
+// LAST_STAFF_KEY は必須入力を省略する目的ではなく、直前に選んだ担当者を
+// プルダウンの初期候補にして選択の手間を減らすためだけに使う（端末ごとの覚え）。
+const LAST_STAFF_KEY='kb_last_staff_v1';
+function getLastStaffId(){ try{ return localStorage.getItem(LAST_STAFF_KEY); }catch(e){ return null; } }
+function rememberLastStaff(id){ try{ localStorage.setItem(LAST_STAFF_KEY,id); }catch(e){} }
 
-let session=null, myProfile=null, currentStaff=null;
+/* ============================================================
+   担当者選択（共通部品）
+   登録・変更・廃棄・来店登録など、記録を残す操作の直前に毎回選ぶ。
+   フォーム内では staffSelectFieldHtml() のプルダウン、
+   来店登録などボタン起点の操作では openStaffPickSheet() の1タップ選択を使う。
+============================================================ */
+function activeStaffFor(storeId){
+  return staffMembers.filter(s=>s.store_id===storeId && s.active).sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+}
+function staffSelectFieldHtml(prefix, storeId, label){
+  const list = activeStaffFor(storeId);
+  const lastId = getLastStaffId();
+  return `<div class="field"><label>${esc(label||'担当者')}<span class="req">必須</span></label>
+    <select id="${prefix}-staff">
+      <option value="">選択してください</option>
+      ${list.map(s=>`<option value="${s.id}" ${s.id===lastId?'selected':''}>${esc(s.name)}</option>`).join('')}
+    </select>
+    ${!list.length?`<div class="hint" style="color:var(--rd);">有効なスタッフが登録されていません。メニュー→スタッフ名簿から追加してください。</div>`:''}
+  </div>`;
+}
+// フォーム内のプルダウンから担当者を取得。未選択ならエラー表示してnullを返す（保存を止めるためnullチェック必須）
+function readStaffField(prefix, storeId){
+  const sel = $(prefix+'-staff');
+  if(!sel || !sel.value){ toast('担当者を選択してください','var(--rd)'); return null; }
+  const s = activeStaffFor(storeId).find(x=>x.id===sel.value);
+  if(!s){ toast('担当者を選択してください','var(--rd)'); return null; }
+  rememberLastStaff(s.id);
+  return {id:s.id, name:s.name};
+}
+// ボタン起点の操作（来店登録など）用：1タップで担当者を選ぶシートを開き、選ばれたら{id,name}、
+// キャンセルならnullでresolveするPromiseを返す
+let _staffPickCtx=null;
+function openStaffPickSheet(storeId, title){
+  return new Promise(resolve=>{
+    const list = activeStaffFor(storeId);
+    $('staffpick-title').textContent = title || '担当者を選択';
+    $('staffpick-body').innerHTML = list.length
+      ? `<div class="staff-grid">${list.map(s=>`<button class="staff-btn" onclick="resolveStaffPick('${s.id}')">${esc(s.name)}</button>`).join('')}</div>
+         <button class="btn-s" style="margin-top:14px;" onclick="cancelStaffPick()">キャンセル</button>`
+      : `<div class="center-msg">有効なスタッフが登録されていません。メニュー→スタッフ名簿から追加してください。</div>
+         <button class="btn-s" style="margin-top:14px;" onclick="cancelStaffPick()">閉じる</button>`;
+    _staffPickCtx = {resolve, storeId};
+    $('staffpick-overlay').classList.add('show');
+  });
+}
+function resolveStaffPick(id){
+  const ctx=_staffPickCtx; _staffPickCtx=null;
+  $('staffpick-overlay').classList.remove('show');
+  if(!ctx) return;
+  const s = activeStaffFor(ctx.storeId).find(x=>x.id===id);
+  if(s){ rememberLastStaff(s.id); ctx.resolve({id:s.id,name:s.name}); }
+  else ctx.resolve(null);
+}
+function cancelStaffPick(){
+  const ctx=_staffPickCtx; _staffPickCtx=null;
+  $('staffpick-overlay').classList.remove('show');
+  if(ctx) ctx.resolve(null);
+}
+
+let session=null, myProfile=null;
 let allStores=[], scopeStoreIds=[];
 let staffMembers=[], brands=[], customers=[], bottles=[];
 let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
 // デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
 // 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
-const APP_VERSION = 'kb-2026-08-22-4';
+const APP_VERSION = 'kb-2026-08-22-5';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -532,56 +586,12 @@ async function afterLogin(){
   scopeStoreIds = isAdmin() ? allStores.map(s=>s.id) : [myProfile.store_id];
 
   $('screen-login').classList.remove('active');
-
-  if(isAdmin()){
-    currentStaff = {id:null, name:'管理者'};
-    await enterApp();
-  } else {
-    const saved = sessionStorage.getItem(STAFF_KEY);
-    if(saved){
-      try{ currentStaff = JSON.parse(saved); }catch(e){ currentStaff=null; }
-    }
-    if(currentStaff && currentStaff.id){
-      await enterApp();
-    } else {
-      await showStaffPick();
-    }
-  }
-}
-
-async function showStaffPick(){
-  $('screen-staffpick').classList.add('active');
-  const {data} = await sb.from('staff_members').select('*').eq('store_id',myProfile.store_id).eq('active',true).order('name');
-  staffMembers = data||[];
-  const grid=$('staffpick-grid');
-  grid.innerHTML = staffMembers.length
-    ? staffMembers.map(m=>`<button class="staff-btn" onclick="pickStaff('${m.id}','${esc(m.name).replace(/'/g,"\\'")}')">${esc(m.name)}</button>`).join('')
-    : `<div class="center-msg" style="grid-column:1/-1;">まだスタッフが登録されていません。下から追加してください。</div>`;
-}
-async function pickStaff(id,name){
-  currentStaff = {id,name};
-  sessionStorage.setItem(STAFF_KEY, JSON.stringify(currentStaff));
-  $('screen-staffpick').classList.remove('active');
   await enterApp();
-}
-async function addStaffAndPick(){
-  const name=$('staffpick-newname').value.trim();
-  if(!name){ toast('スタッフ名を入力してください','var(--rd)'); return; }
-  const {data,error} = await sb.from('staff_members').insert({store_id:myProfile.store_id,name,created_by:session.user.id}).select().single();
-  if(error){ toast('追加できませんでした','var(--rd)'); return; }
-  await pickStaff(data.id,data.name);
-}
-function switchStaff(){
-  sessionStorage.removeItem(STAFF_KEY);
-  currentStaff=null;
-  $('app-root').style.display='none';
-  showStaffPick();
 }
 
 async function enterApp(){
-  $('screen-staffpick').classList.remove('active');
   $('app-root').style.display='block';
-  $('topbar-staff').textContent = (isAdmin()?'管理者':storeName(myProfile.store_id))+' / '+(currentStaff?currentStaff.name:'');
+  $('topbar-staff').textContent = isAdmin()?'管理者':storeName(myProfile.store_id);
   await loadScopeData();
   subscribeRealtime();
   navStack=[];
@@ -590,8 +600,7 @@ async function enterApp(){
 
 async function logout(){
   await sb.auth.signOut();
-  sessionStorage.removeItem(STAFF_KEY);
-  session=null; myProfile=null; currentStaff=null;
+  session=null; myProfile=null;
   if(realtimeChannel){ sb.removeChannel(realtimeChannel); realtimeChannel=null; }
   $('app-root').style.display='none';
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
@@ -958,9 +967,12 @@ function renderDashboard(){
 async function registerVisit(customerId){
   const c = customers.find(x=>x.id===customerId);
   if(!c) return;
+  // 来店登録は頻度が高い操作のため、フォームではなく1タップで選べる担当者シートを先に出す
+  const staff = await openStaffPickSheet(c.store_id, `${c.name}様の来店登録：担当者を選択`);
+  if(!staff) return; // キャンセル
   const today=jstTodayStr();
   if(c.last_visit_at===today){
-    visitCtx={customerId};
+    visitCtx={customerId, staff};
     $('visit-body').innerHTML = `
       <div style="margin-bottom:18px;color:var(--sb);font-size:14px;">${esc(c.name)}様は本日すでに来店登録されています。追加で登録しますか？</div>
       <div class="btn-row">
@@ -970,18 +982,18 @@ async function registerVisit(customerId){
     $('visit-overlay').classList.add('show');
     return;
   }
-  await doRegisterVisit(customerId);
+  await doRegisterVisit(customerId, staff);
 }
 async function confirmVisitDup(){
   closeOverlay('visit-overlay');
-  if(visitCtx) await doRegisterVisit(visitCtx.customerId,true);
+  if(visitCtx) await doRegisterVisit(visitCtx.customerId, visitCtx.staff);
 }
-async function doRegisterVisit(customerId){
+async function doRegisterVisit(customerId, staff){
   const c = customers.find(x=>x.id===customerId);
   const {error} = await sb.rpc('register_visit',{
     p_customer_id: customerId,
-    p_staff_member_id: currentStaff.id,
-    p_staff_member_name: currentStaff.name
+    p_staff_member_id: staff.id,
+    p_staff_member_name: staff.name
   });
   if(error){ toast('来店登録に失敗しました','var(--rd)'); return; }
   toast(`${c.name}様の来店を登録しました`);
@@ -1065,7 +1077,7 @@ function renderCustomerForm(params){
     <div class="ph"><div class="ey">CUSTOMER</div><h2>${editing?'お客様情報の編集':'新規お客様登録'}</h2></div>
     <div class="card">
       ${(!editing && isAdmin())?`<div class="field"><label>所属店舗<span class="req">必須</span></label>
-        <select id="cf-store" onchange="initBottleFields('nf', this.value)">${allStores.map(s=>`<option value="${s.id}" ${s.id===defaultStoreId?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        <select id="cf-store" onchange="onCustomerStoreChange(this.value)">${allStores.map(s=>`<option value="${s.id}" ${s.id===defaultStoreId?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
       </div>`:''}
       <div class="field"><label>お客様名<span class="req">必須</span></label><input type="text" id="cf-name" value="${esc(c?c.name:'')}" placeholder="例）田中 太郎"></div>
       <div class="field"><label>フリガナ</label><input type="text" id="cf-kana" value="${esc(c?c.kana:'')}" placeholder="例）たなか たろう"><div class="hint">カタカナで入力しても、保存時に自動でひらがなに変換されます</div></div>
@@ -1079,10 +1091,18 @@ function renderCustomerForm(params){
       <div class="ct">最初の1本を登録（あとから追加も可能）</div>
       ${bottleFieldsHtml('nf')}
     </div>`:''}
+    <div class="card">
+      ${staffSelectFieldHtml('cf', defaultStoreId, editing?'変更担当者':'登録担当者')}
+    </div>
     <button class="btn-p" onclick="${editing?`submitCustomerEdit('${c.id}')`:'submitCustomerNew()'}">保存する</button>
     <div id="cf-nameCheck"></div>
   `;
   if(!editing){ initBottleFields('nf', defaultStoreId); }
+}
+function onCustomerStoreChange(storeId){
+  initBottleFields('nf', storeId);
+  const sel=$('cf-staff');
+  if(sel) sel.outerHTML = staffSelectFieldHtml('cf', storeId, '登録担当者').match(/<select[\s\S]*?<\/select>/)[0];
 }
 function targetStoreIdForNewCustomer(){
   return isAdmin() ? ($('cf-store')?$('cf-store').value:(allStores[0]&&allStores[0].id)) : myProfile.store_id;
@@ -1094,12 +1114,15 @@ async function checkDuplicateName(name,storeId){
 async function submitCustomerNew(){
   const name=$('cf-name').value.trim();
   if(!name){ toast('お客様名を入力してください','var(--rd)'); return; }
-  const dup = await checkDuplicateName(name, targetStoreIdForNewCustomer());
+  const storeId = targetStoreIdForNewCustomer();
+  const staff = readStaffField('cf', storeId);
+  if(!staff) return;
+  const dup = await checkDuplicateName(name, storeId);
   if(dup.length){
-    showDupWarning(dup, ()=>doCreateCustomer());
+    showDupWarning(dup, ()=>doCreateCustomer(staff));
     return;
   }
-  await doCreateCustomer();
+  await doCreateCustomer(staff);
 }
 function showDupWarning(dupList,onProceed){
   $('dup-body').innerHTML = `
@@ -1124,7 +1147,7 @@ function proceedDupCreate(){
   const fn=$('dup-overlay')._proceed;
   if(fn) fn();
 }
-async function doCreateCustomer(){
+async function doCreateCustomer(staff){
   const payload={
     store_id: targetStoreIdForNewCustomer(),
     name: $('cf-name').value.trim(),
@@ -1137,11 +1160,11 @@ async function doCreateCustomer(){
   };
   const {data,error} = await sb.from('customers').insert(payload).select().single();
   if(error){ toast('登録できませんでした','var(--rd)'); return; }
-  await logAudit('customer_create',{customer_id:data.id,after:payload,store_id:payload.store_id});
+  await logAudit('customer_create',{customer_id:data.id,after:payload,store_id:payload.store_id,staff});
 
   const nf = readBottleFields('nf');
   if(nf && nf.brandId && nf.number){
-    await createBottleRow(data.id, payload.store_id, nf);
+    await createBottleRow(data.id, payload.store_id, nf, staff);
   }
   toast(`${data.name}様を登録しました`);
   await loadScopeData();
@@ -1159,9 +1182,11 @@ async function submitCustomerEdit(id){
     updated_by: session.user.id, updated_at: new Date().toISOString()
   };
   if(!payload.name){ toast('お客様名を入力してください','var(--rd)'); return; }
+  const staff = readStaffField('cf', before.store_id);
+  if(!staff) return;
   const {error} = await sb.from('customers').update(payload).eq('id',id);
   if(error){ toast('更新できませんでした','var(--rd)'); return; }
-  await logAudit('customer_update',{customer_id:id,before,after:payload,store_id:before.store_id});
+  await logAudit('customer_update',{customer_id:id,before,after:payload,store_id:before.store_id,staff});
   toast('更新しました');
   await loadScopeData();
   goBack();
@@ -1262,7 +1287,7 @@ function readBottleFields(prefix){
   const b = (bfBrandList[prefix]||[]).find(x=>x.id===brandId);
   return {brandId, brandName: b?b.name:'', number:parseInt(numEl.value,10), registeredAt:dateEl.value||jstTodayStr()};
 }
-async function createBottleRow(customerId, storeId, fields){
+async function createBottleRow(customerId, storeId, fields, staff){
   if(!validateNumberFieldRaw(storeId,fields.brandId,fields.number)){
     toast('この番号は現在使用中のため登録できませんでした','var(--rd)');
     return null;
@@ -1278,8 +1303,8 @@ async function createBottleRow(customerId, storeId, fields){
     else toast('ボトルを登録できませんでした','var(--rd)');
     return null;
   }
-  await sb.from('bottle_history').insert({bottle_id:data.id,customer_id:customerId,store_id:storeId,event_type:'registered',after:payload,staff_member_id:currentStaff.id,staff_member_name:currentStaff.name,created_by:session.user.id});
-  await logAudit('bottle_create',{customer_id:customerId,bottle_id:data.id,after:payload,store_id:storeId});
+  await sb.from('bottle_history').insert({bottle_id:data.id,customer_id:customerId,store_id:storeId,event_type:'registered',after:payload,staff_member_id:staff?staff.id:null,staff_member_name:staff?staff.name:null,created_by:session.user.id});
+  await logAudit('bottle_create',{customer_id:customerId,bottle_id:data.id,after:payload,store_id:storeId,staff});
   return data;
 }
 function validateNumberFieldRaw(storeId,brandId,number){
@@ -1294,12 +1319,14 @@ function renderBottleForm(params){
   const root=$('screen-bottle-form');
   if(params.mode==='new'){
     const c = customers.find(x=>x.id===params.customerId);
+    const storeId = c ? c.store_id : myProfile.store_id;
     root.innerHTML = `
       <div class="ph"><div class="ey">BOTTLE</div><h2>ボトル追加 - ${esc(c?c.name:'')}様</h2></div>
       <div class="card">${bottleFieldsHtml('bf')}</div>
+      <div class="card">${staffSelectFieldHtml('bf', storeId, '登録担当者')}</div>
       <button class="btn-p" onclick="submitBottleNew('${params.customerId}')">登録する</button>
     `;
-    initBottleFields('bf', c ? c.store_id : myProfile.store_id);
+    initBottleFields('bf', storeId);
     return;
   }
   // view / edit existing bottle
@@ -1317,6 +1344,7 @@ function renderBottleForm(params){
       <div class="kv"><span class="kk">保管期限</span><span class="kvv">${fmtDate(b.expires_at)}</span></div>
     </div>
     ${b.status==='disposed' ? `<div class="card" id="bf-disposal-box"><div class="spinner"></div></div>` : ''}
+    ${b.status==='keeping' ? `<div class="card">${staffSelectFieldHtml('bfe', b.store_id, '変更担当者')}<div class="hint">保管期限・番号を変更するときに必要です</div></div>` : ''}
     ${b.status==='keeping' && canEditExpiry ? `
     <div class="card">
       <div class="ct">保管期限の変更（管理者）</div>
@@ -1352,18 +1380,22 @@ async function submitBottleNew(customerId){
   const fields = readBottleFields('bf');
   if(!fields){ toast('銘柄と番号を入力してください','var(--rd)'); return; }
   const customer = customers.find(x=>x.id===customerId);
-  const created = await createBottleRow(customerId, customer.store_id, fields);
+  const staff = readStaffField('bf', customer.store_id);
+  if(!staff) return;
+  const created = await createBottleRow(customerId, customer.store_id, fields, staff);
   if(created){ toast('ボトルを登録しました'); await loadScopeData(); goBack(); showScreen('customer',{id:customerId}); }
 }
 async function submitExpiryChange(bottleId){
   const b=bottles.find(x=>x.id===bottleId);
   const newDate=$('bf-expiry').value;
   if(!newDate) return;
+  const staff = readStaffField('bfe', b.store_id);
+  if(!staff) return;
   const before={expires_at:b.expires_at};
   const {error}=await sb.from('bottles').update({expires_at:newDate,updated_at:new Date().toISOString()}).eq('id',bottleId);
   if(error){ toast('変更できませんでした','var(--rd)'); return; }
-  await sb.from('bottle_history').insert({bottle_id:bottleId,customer_id:b.customer_id,store_id:b.store_id,event_type:'expiry_changed',before,after:{expires_at:newDate},staff_member_id:currentStaff.id,staff_member_name:currentStaff.name,created_by:session.user.id});
-  await logAudit('expiry_change',{customer_id:b.customer_id,bottle_id:bottleId,before,after:{expires_at:newDate},store_id:b.store_id});
+  await sb.from('bottle_history').insert({bottle_id:bottleId,customer_id:b.customer_id,store_id:b.store_id,event_type:'expiry_changed',before,after:{expires_at:newDate},staff_member_id:staff.id,staff_member_name:staff.name,created_by:session.user.id});
+  await logAudit('expiry_change',{customer_id:b.customer_id,bottle_id:bottleId,before,after:{expires_at:newDate},store_id:b.store_id,staff});
   toast('保管期限を変更しました');
   await loadScopeData();
   renderBottleForm({mode:'view',id:bottleId});
@@ -1372,13 +1404,15 @@ async function submitNumberChange(bottleId){
   const b=bottles.find(x=>x.id===bottleId);
   const newNum=parseInt($('bf-number').value,10);
   if(!newNum || newNum===b.number) return;
+  const staff = readStaffField('bfe', b.store_id);
+  if(!staff) return;
   const used=usedNumbersFor(b.store_id,b.brand_id).filter(n=>n!==b.number);
   if(used.includes(newNum)){ toast('この番号は現在使用中です','var(--rd)'); return; }
   const before={number:b.number};
   const {error}=await sb.from('bottles').update({number:newNum,updated_at:new Date().toISOString()}).eq('id',bottleId);
   if(error){ toast(error.code==='23505'?'この番号は現在使用中です':'変更できませんでした','var(--rd)'); return; }
-  await sb.from('bottle_history').insert({bottle_id:bottleId,customer_id:b.customer_id,store_id:b.store_id,event_type:'number_changed',before,after:{number:newNum},staff_member_id:currentStaff.id,staff_member_name:currentStaff.name,created_by:session.user.id});
-  await logAudit('number_change',{customer_id:b.customer_id,bottle_id:bottleId,before,after:{number:newNum},store_id:b.store_id});
+  await sb.from('bottle_history').insert({bottle_id:bottleId,customer_id:b.customer_id,store_id:b.store_id,event_type:'number_changed',before,after:{number:newNum},staff_member_id:staff.id,staff_member_name:staff.name,created_by:session.user.id});
+  await logAudit('number_change',{customer_id:b.customer_id,bottle_id:bottleId,before,after:{number:newNum},store_id:b.store_id,staff});
   toast('番号を変更しました');
   await loadScopeData();
   renderBottleForm({mode:'view',id:bottleId});
@@ -1390,13 +1424,14 @@ async function submitNumberChange(bottleId){
 function openDisposeSheet(bottleId, defaultReason){
   const b = bottles.find(x=>x.id===bottleId);
   const c = customers.find(x=>x.id===b.customer_id);
-  disposeCtx={bottleId};
+  disposeCtx={bottleId, storeId:b.store_id};
   $('dispose-body').innerHTML = `
     <div class="kv"><span class="kk">お客様</span><span class="kvv">${esc(c.name)} 様</span></div>
     <div class="kv"><span class="kk">銘柄</span><span class="kvv">${esc(b.brand_name)}</span></div>
     <div class="kv"><span class="kk">管理番号</span><span class="kvv">No.${b.number}</span></div>
     <div class="kv"><span class="kk">現在の状態</span><span class="kvv">${badgeHtml(b.display_status)}</span></div>
     <div class="kv"><span class="kk">保管期限</span><span class="kvv">${fmtDate(b.expires_at)}</span></div>
+    <div style="margin-top:16px;">${staffSelectFieldHtml('ds', b.store_id, '廃棄担当者')}</div>
     <div class="field" style="margin-top:16px;"><label>廃棄理由<span class="req">必須</span></label>
       <select id="ds-reason" onchange="onReasonChange()">
         ${defaultReason?'':'<option value="">選択してください</option>'}
@@ -1423,11 +1458,13 @@ function onReasonChange(){
 async function submitDispose(){
   const reason=$('ds-reason').value;
   const note=$('ds-note').value.trim();
+  const staff = readStaffField('ds', disposeCtx.storeId);
+  if(!staff) return;
   if(!reason){ toast('廃棄理由を選択してください','var(--rd)'); return; }
   if(reason==='other' && !note){ toast('その他を選んだ場合は備考の入力が必要です','var(--rd)'); return; }
   const {error} = await sb.rpc('dispose_bottle',{
     p_bottle_id: disposeCtx.bottleId, p_reason: reason, p_note: note||null,
-    p_staff_member_id: currentStaff.id, p_staff_member_name: currentStaff.name
+    p_staff_member_id: staff.id, p_staff_member_name: staff.name
   });
   if(error){ toast('廃棄処理に失敗しました','var(--rd)'); return; }
   closeOverlay('dispose-overlay');
@@ -1521,7 +1558,6 @@ function renderMenu(){
       ${menuItem('🍾 ボトル銘柄管理',"navTo('brands')")}
       ${menuItem('📋 銘柄別お客様一覧',"navTo('brand-customers')")}
       ${menuItem('🧑 スタッフ名簿',"navTo('staff')")}
-      ${!admin? menuItem('🔁 スタッフ切替',"switchStaff()"):''}
       ${menuItem('🗑 廃棄履歴',"navTo('disposals')")}
     </div>
     ${admin?`
@@ -1885,9 +1921,10 @@ async function loadAudit(){
   </tr>`).join('');
 }
 async function logAudit(action,ctx){
+  const staff = ctx.staff||null;
   await sb.from('audit_logs').insert({
     store_id: ctx.store_id, action, actor_id: session.user.id,
-    staff_member_id: currentStaff?currentStaff.id:null, staff_member_name: currentStaff?currentStaff.name:null,
+    staff_member_id: staff?staff.id:null, staff_member_name: staff?staff.name:null,
     customer_id: ctx.customer_id||null, bottle_id: ctx.bottle_id||null,
     before: ctx.before||null, after: ctx.after||null
   });
