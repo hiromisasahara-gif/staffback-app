@@ -240,6 +240,8 @@ nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(19,19,
   <div id="screen-numbers" class="screen"></div>
   <!-- メニュー -->
   <div id="screen-menu" class="screen"></div>
+  <!-- お客様一覧 -->
+  <div id="screen-customer-list" class="screen"></div>
   <!-- お客様詳細 -->
   <div id="screen-customer" class="screen"></div>
   <!-- お客様登録・編集 -->
@@ -390,7 +392,7 @@ let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
 // デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
 // 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
-const APP_VERSION = 'kb-2026-08-22-8';
+const APP_VERSION = 'kb-2026-08-22-9';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -655,7 +657,7 @@ async function reloadBrandsQuiet(){
    画面ナビゲーション
 ============================================================ */
 const NAV_TITLES={home:'キープボトル管理',expiry:'保管期限管理',numbers:'空き番号確認',menu:'メニュー',
-  customer:'お客様詳細','customer-form':'お客様登録・編集','bottle-form':'ボトル登録・編集',
+  'customer-list':'お客様一覧',customer:'お客様詳細','customer-form':'お客様登録・編集','bottle-form':'ボトル登録・編集',
   brands:'ボトル銘柄管理','brand-customers':'銘柄別お客様一覧',disposals:'廃棄履歴',audit:'操作履歴',stores:'店舗管理',csv:'CSV出力',datamanage:'データ管理'};
 
 function navTo(screen,params){
@@ -685,6 +687,7 @@ function showScreen(screen,params){
   document.querySelectorAll('.bn-btn').forEach(b=>b.classList.toggle('active', b.dataset.nav===screen));
   window.scrollTo(0,0);
   const renderers={home:renderHome,expiry:()=>renderExpiry(params),numbers:renderNumbers,menu:renderMenu,
+    'customer-list':renderCustomerList,
     customer:()=>renderCustomerDetail(params),'customer-form':()=>renderCustomerForm(params),
     'bottle-form':()=>renderBottleForm(params),brands:renderBrands,'brand-customers':()=>renderBrandCustomers(params),
     disposals:renderDisposals,audit:renderAudit,stores:renderStores,csv:renderCsv,datamanage:renderDataManage};
@@ -1633,6 +1636,7 @@ function renderMenu(){
     <div class="ph"><div class="ey">MENU</div><h2>メニュー</h2></div>
     <div class="section-title">店舗の管理</div>
     <div class="card" style="padding:0;">
+      ${menuItem('👥 お客様一覧',"navTo('customer-list')")}
       ${menuItem('🍾 ボトル銘柄管理',"navTo('brands')")}
       ${menuItem('📋 銘柄別お客様一覧',"navTo('brand-customers')")}
       ${menuItem('🗑 廃棄履歴',"navTo('disposals')")}
@@ -1874,6 +1878,92 @@ function renderBrandCustomersDetail(brandId){
     <div style="color:var(--mu);font-size:13px;margin-bottom:14px;">保管中のお客様 ${holders.length}名</div>
     ${holders.length ? sections : `<div class="empty-hint">現在このボトルを保管しているお客様はいません</div>`}
   `;
+}
+
+/* ============================================================
+   お客様一覧
+   （現在の店舗のお客様を、フリガナの五十音順で一覧表示。
+    検索中は五十音グループをやめ、一致度の高い順に並べる）
+============================================================ */
+function customerListRowHtml(c){
+  const cb = bottles.filter(b=>b.customer_id===c.id && b.status==='keeping');
+  const bottlesHtml = cb.length
+    ? `<div class="result-bottles">${cb.map(b=>`<div class="bottle-chip ${b.display_status}"><div class="bc-brand">${esc(b.brand_name)}</div><div class="bc-num">No.${b.number}</div></div>`).join('')}</div>`
+    : `<div class="no-bottle">保管中のボトルはありません</div>`;
+  const countLabel = `保管中 ${cb.length}本`;
+  return `<div class="result-card" onclick="navTo('customer',{id:'${c.id}'})">
+    <div class="result-name">${esc(c.name)} 様</div>
+    <div class="result-sub">${c.kana?esc(c.kana)+' ／ ':''}${countLabel}</div>
+    ${bottlesHtml}
+  </div>`;
+}
+// お客様名・フリガナ・会社名・領収書名・電話番号を対象に、通常検索と同じ表記ゆれ吸収で照合する
+function customerListMatchScore(c, queryNorm, queryTokens){
+  let best=0;
+  [c.name, c.kana, c.company, c.receipt_name, c.phone].forEach(v=>{
+    best = Math.max(best, fieldMatchScore(v, queryNorm, queryTokens));
+  });
+  return best;
+}
+function renderCustomerList(){
+  const storeId = resolvedAdminStoreId();
+  const root = $('screen-customer-list');
+  const q = root._q || '';
+  root.innerHTML = `
+    <div class="ph"><div class="ey">CUSTOMERS</div><h2>お客様一覧</h2></div>
+    ${adminScopeBarHtml()}
+    <div class="search-wrap" style="margin-bottom:14px;">
+      <input type="text" class="search-input" style="font-size:16px;min-height:50px;padding:14px 44px 14px 16px;" id="cl-search" placeholder="🔍 お客様名・フリガナ・会社名・電話番号で絞り込み" value="${esc(q)}" oninput="onCustomerListSearch()">
+      <button class="search-clear ${q?'show':''}" style="right:10px;" onclick="clearCustomerListSearch()">✕</button>
+    </div>
+    <div id="cl-list"></div>
+  `;
+  renderCustomerListBody(storeId, q);
+}
+function renderCustomerListBody(storeId, q){
+  const list = customers.filter(c=>c.store_id===storeId);
+  const box = $('cl-list');
+  if(!list.length){
+    box.innerHTML = `<div class="empty-hint">お客様が登録されていません</div>`;
+    return;
+  }
+  if(q.trim()){
+    const qn = normalizeForSearch(q), qt = tokenizeForSearch(q);
+    const filtered = list.map(c=>({c,score:customerListMatchScore(c,qn,qt)}))
+      .filter(x=>x.score>0).sort((a,b)=>b.score-a.score).map(x=>x.c);
+    box.innerHTML = filtered.length ? filtered.map(c=>customerListRowHtml(c)).join('')
+      : `<div class="empty-hint">「${esc(q)}」に一致するお客様が見つかりません</div>`;
+    return;
+  }
+  // 通常時：フリガナの五十音グループ表示（フリガナ未登録は末尾）
+  const grouped = {};
+  list.forEach(c=>{
+    const row = c.kana ? (gojuonRowFor(c.kana)||UNREGISTERED_KANA_LABEL) : UNREGISTERED_KANA_LABEL;
+    (grouped[row]=grouped[row]||[]).push(c);
+  });
+  const rowOrder = GOJUON_ROWS.map(r=>r.label).concat([UNREGISTERED_KANA_LABEL]);
+  box.innerHTML = rowOrder.map(label=>{
+    const items = (grouped[label]||[]).sort((a,b)=>(a.kana||'').localeCompare(b.kana||'','ja'));
+    if(!items.length) return '';
+    return `<div class="section-title">${esc(label)}</div>` + items.map(c=>customerListRowHtml(c)).join('');
+  }).join('');
+}
+function onCustomerListSearch(){
+  const root=$('screen-customer-list');
+  const v = $('cl-search').value;
+  root._q = v;
+  const clearBtn = document.querySelector('#screen-customer-list .search-clear');
+  if(clearBtn) clearBtn.classList.toggle('show', !!v);
+  renderCustomerListBody(resolvedAdminStoreId(), v);
+}
+function clearCustomerListSearch(){
+  const root=$('screen-customer-list');
+  root._q='';
+  $('cl-search').value='';
+  const clearBtn = document.querySelector('#screen-customer-list .search-clear');
+  if(clearBtn) clearBtn.classList.remove('show');
+  renderCustomerListBody(resolvedAdminStoreId(), '');
+  $('cl-search').focus();
 }
 
 /* ============================================================
