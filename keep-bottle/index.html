@@ -399,7 +399,7 @@ let adminStoreFilter='all';
 let navStack=[]; // {screen, params}
 // デプロイのたびに更新する表示用バージョン。メニュー画面の一番下に表示し、
 // 実機が最新のコードを読み込めているかをユーザー自身が確認できるようにする。
-const APP_VERSION = 'kb-2026-08-22-6';
+const APP_VERSION = 'kb-2026-08-22-7';
 let curScreen=null, curParams=null;
 let realtimeChannel=null;
 let disposeCtx=null, visitCtx=null;
@@ -1035,9 +1035,79 @@ async function renderCustomerDetail(params){
 
     <div class="section-title">廃棄履歴</div>
     <div class="card" id="disposals-box"><div class="spinner"></div></div>
+
+    <button class="btn-s" style="margin-top:24px;color:var(--rd);border-color:rgba(224,108,117,.3);" onclick="openCustomerDeleteSheet('${c.id}')">🗑 お客様を削除</button>
   `;
   loadCustomerVisits(c.id);
   loadCustomerDisposals(c.id);
+}
+const CUSTOMER_DELETE_REASONS = {duplicate:'重複登録', test:'テストデータ', mistake:'入力間違い', other:'その他'};
+let _deleteCustomerCtx=null;
+function openCustomerDeleteSheet(customerId, onDone){
+  const c = customers.find(x=>x.id===customerId);
+  if(!c) return;
+  if(!isAdmin() && c.store_id!==myProfile.store_id){ toast('この操作はできません','var(--rd)'); return; }
+  const keepingCount = bottles.filter(b=>b.customer_id===customerId && b.status==='keeping').length;
+  if(keepingCount>0){
+    toast('このお客様には保管中のボトルがあります。先にボトルを廃棄・移行してください。','var(--rd)');
+    return;
+  }
+  _deleteCustomerCtx = {customerId, storeId:c.store_id, onDone};
+  $('confirm-title').textContent='このお客様を削除しますか？';
+  $('confirm-body').innerHTML = `
+    <div style="color:var(--sb);font-size:14px;margin-bottom:16px;">${esc(c.name)}様を、検索結果や一覧から表示されないようにします。来店履歴・廃棄履歴などの記録は削除せずそのまま保持されます。</div>
+    ${staffSelectFieldHtml('cd', c.store_id, '削除担当者')}
+    <div class="field"><label>削除理由</label>
+      <select id="cd-reason" onchange="onCustomerDeleteReasonChange()">
+        <option value="">選択してください（任意）</option>
+        <option value="duplicate">重複登録</option>
+        <option value="test">テストデータ</option>
+        <option value="mistake">入力間違い</option>
+        <option value="other">その他</option>
+      </select>
+    </div>
+    <div class="field" id="cd-note-field" style="display:none;"><label>削除理由（自由入力）<span class="req">必須</span></label>
+      <textarea id="cd-note" placeholder="例）お客様ご本人からの申告により"></textarea>
+    </div>
+    <div class="btn-row" style="margin-top:6px;">
+      <button class="btn-s" onclick="closeOverlay('confirm-overlay')">キャンセル</button>
+      <button class="btn-danger" onclick="submitCustomerDelete()">削除する</button>
+    </div>`;
+  $('confirm-overlay').classList.add('show');
+}
+function onCustomerDeleteReasonChange(){
+  const r=$('cd-reason').value;
+  $('cd-note-field').style.display = r==='other' ? 'block' : 'none';
+}
+async function submitCustomerDelete(){
+  const ctx=_deleteCustomerCtx;
+  if(!ctx) return;
+  const staff = readStaffField('cd', ctx.storeId);
+  if(!staff) return;
+  const reasonVal = $('cd-reason').value;
+  const note = $('cd-note') ? $('cd-note').value.trim() : '';
+  if(reasonVal==='other' && !note){ toast('その他を選んだ場合は理由の入力が必要です','var(--rd)'); return; }
+  // 保存直前に、他端末でボトルが追加されていないか最新状態を再確認する
+  const {data:freshBottles} = await sb.from('bottles').select('id').eq('customer_id',ctx.customerId).eq('status','keeping');
+  if(freshBottles && freshBottles.length){
+    closeOverlay('confirm-overlay');
+    toast('このお客様には保管中のボトルがあります。先にボトルを廃棄・移行してください。','var(--rd)');
+    return;
+  }
+  const c = customers.find(x=>x.id===ctx.customerId);
+  const reasonText = reasonVal ? (CUSTOMER_DELETE_REASONS[reasonVal]||reasonVal) : null;
+  const {error} = await sb.from('customers').update({deleted_at:new Date().toISOString(), deleted_by:session.user.id}).eq('id',ctx.customerId);
+  if(error){ toast('削除できませんでした','var(--rd)'); return; }
+  await logAudit('customer_update',{
+    customer_id:ctx.customerId, store_id:ctx.storeId, staff,
+    before:{deleted:false, name:c?c.name:null},
+    after:{deleted:true, name:c?c.name:null},
+    reason: reasonText, note: (reasonVal==='other'?note:null)
+  });
+  closeOverlay('confirm-overlay');
+  toast(`${c?c.name:''}様を削除しました`);
+  await loadScopeData();
+  if(ctx.onDone) ctx.onDone(); else goHome();
 }
 function bottleRowHtml(b){
   const expTxt = b.status==='disposed' ? '' : `<div class="exp">期限 ${fmtDate(b.expires_at)}</div>`;
@@ -1953,7 +2023,8 @@ async function logAudit(action,ctx){
     store_id: ctx.store_id, action, actor_id: session.user.id,
     staff_member_id: staff?staff.id:null, staff_member_name: staff?staff.name:null,
     customer_id: ctx.customer_id||null, bottle_id: ctx.bottle_id||null,
-    before: ctx.before||null, after: ctx.after||null
+    before: ctx.before||null, after: ctx.after||null,
+    reason: ctx.reason||null, note: ctx.note||null
   });
 }
 
@@ -2086,15 +2157,8 @@ function dmSearch(){
     <button class="bd2" onclick="softDeleteCustomer('${c.id}')">論理削除</button></div>`).join('') || `<div class="center-msg">該当なし</div>`;
 }
 async function softDeleteCustomer(id){
-  if(!confirm) {}
-  const c=customers.find(x=>x.id===id);
-  showConfirm('お客様を削除しますか？',`${esc(c.name)}様を一覧から非表示にします。完全削除ではありません。`, async ()=>{
-    await sb.from('customers').update({deleted_at:new Date().toISOString(),deleted_by:session.user.id}).eq('id',id);
-    await logAudit('customer_update',{customer_id:id,after:{deleted:true},store_id:c.store_id});
-    toast('削除しました');
-    await loadScopeData();
-    renderDataManage();
-  });
+  // お客様詳細画面と同じ削除フロー（保管中ボトルの確認・削除担当者必須・削除理由）を使う
+  openCustomerDeleteSheet(id, ()=>renderDataManage());
 }
 function showConfirm(title,body,onYes){
   $('confirm-title').textContent=title;
