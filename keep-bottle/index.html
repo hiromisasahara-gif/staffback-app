@@ -408,6 +408,17 @@ function searchSimilarity(a,b){
   return 1 - dist/Math.max(a.length,b.length);
 }
 const FUZZY_MATCH_THRESHOLD = 0.6; // これ未満は「別物」とみなして候補に出さない
+// 音声認識が「みずなら」を「水なら」のように漢字混じりで書き起こす、といった
+// ごく一部の代表的な読み間違いだけを、安全な範囲で吸収するためのヒント辞書。
+// （お客様名の一致判定そのものには使わず、検索語のゆらぎ候補を増やす用途のみに使う）
+const KANJI_READING_HINTS = {'水':'みず'};
+function withKanjiReadingHints(token){
+  let out = token;
+  Object.keys(KANJI_READING_HINTS).forEach(k=>{
+    if(out.indexOf(k)!==-1) out = out.split(k).join(KANJI_READING_HINTS[k]);
+  });
+  return out;
+}
 // 1つの項目（お客様名・フリガナ・銘柄名など）に対する一致度を返す。
 // 3=通常の部分一致（従来通り） / 2=複数語すべてが個別に含まれる語順違い一致 / 1〜1.5=音声認識のゆらぎを想定したあいまい一致 / 0=不一致
 function fieldMatchScore(fieldValue, queryNorm, queryTokens){
@@ -415,10 +426,13 @@ function fieldMatchScore(fieldValue, queryNorm, queryTokens){
   const normField = normalizeForSearch(fieldValue);
   if(!normField) return 0;
   if(queryNorm && normField.includes(queryNorm)) return 3;
-  if(queryTokens.length>1 && queryTokens.every(t=>normField.includes(t))) return 2;
-  if(queryTokens.some(t=>t.length>=2 && normField.includes(t))) return 2;
+  const hinted = queryTokens.map(withKanjiReadingHints);
+  const tokenHit = (t,i)=> (t.length>=1 && normField.includes(t)) || (hinted[i].length>=1 && normField.includes(hinted[i]));
+  if(queryTokens.length>1 && queryTokens.every((t,i)=>tokenHit(t,i))) return 2;
+  if(queryTokens.some((t,i)=> t.length>=2 && tokenHit(t,i))) return 2;
+  const queryHinted = withKanjiReadingHints(queryNorm);
   if(queryNorm.length>=2){
-    const sim = searchSimilarity(queryNorm, normField);
+    const sim = Math.max(searchSimilarity(queryNorm, normField), searchSimilarity(queryHinted, normField));
     if(sim>=FUZZY_MATCH_THRESHOLD) return 1+sim*0.5;
   }
   return 0;

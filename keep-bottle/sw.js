@@ -2,7 +2,7 @@
 // オフラインでも起動できるように、アプリの土台ファイルを保存(キャッシュ)します。
 // データそのもの(お客様・ボトル情報)はキャッシュしません。データはSupabaseに保存されます。
 
-const CACHE_VERSION = 'keep-bottle-v1';
+const CACHE_VERSION = 'keep-bottle-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
