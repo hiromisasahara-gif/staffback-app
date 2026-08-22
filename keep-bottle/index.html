@@ -36,12 +36,20 @@ button,input,select,textarea{font-family:inherit;}
 .full{max-width:none;}
 
 /* ── SEARCH ── */
-.search-wrap{position:relative;margin-bottom:18px;}
-.search-input{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:16px;padding:18px 20px;color:var(--tx);font-size:19px;font-weight:500;min-height:60px;outline:none;transition:border-color .2s;}
+.search-wrap{position:relative;margin-bottom:10px;}
+.search-input{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:16px;padding:18px 94px 18px 20px;color:var(--tx);font-size:19px;font-weight:500;min-height:60px;outline:none;transition:border-color .2s;}
 .search-input:focus{border-color:var(--ac);}
 .search-input::placeholder{color:var(--mu);}
-.search-clear{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:var(--sf2);border:none;color:var(--sb);width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:none;}
+.search-clear{position:absolute;right:60px;top:50%;transform:translateY(-50%);background:var(--sf2);border:none;color:var(--sb);width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:none;}
 .search-clear.show{display:block;}
+.search-mic{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:var(--sf2);border:1px solid var(--bd);color:var(--sb);width:42px;height:42px;border-radius:50%;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;padding:0;}
+.search-mic:active{border-color:var(--ac);color:var(--ac);}
+.search-mic.listening{background:var(--rd);border-color:var(--rd);color:#fff;animation:mic-pulse 1.2s ease-in-out infinite;}
+.search-mic.unsupported{opacity:.4;}
+@keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(224,108,117,.45);}50%{box-shadow:0 0 0 9px rgba(224,108,117,0);}}
+.voice-status{display:none;align-items:center;gap:8px;color:var(--ac2);font-size:13px;font-weight:500;margin:0 0 16px 4px;}
+.voice-status.show{display:flex;}
+.voice-status .dot{width:8px;height:8px;border-radius:50%;background:var(--rd);flex-shrink:0;animation:mic-pulse 1.2s ease-in-out infinite;}
 
 .result-card{background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:18px;margin-bottom:12px;cursor:pointer;transition:border-color .15s;}
 .result-card:active{border-color:var(--ac);}
@@ -623,12 +631,15 @@ function renderHome(){
     <div class="search-wrap">
       <input type="text" class="search-input" id="search-box" placeholder="🔍 お客様名・銘柄・番号で検索" oninput="onSearchInput()" value="${esc(root._q||'')}">
       <button class="search-clear ${root._q?'show':''}" onclick="clearSearch()">✕</button>
+      <button class="search-mic ${voiceSearchSupported()?'':'unsupported'}" id="voice-mic-btn" onclick="toggleVoiceSearch()" aria-label="音声で検索" title="音声で検索">🎤</button>
     </div>
+    <div class="voice-status" id="voice-status"><span class="dot"></span><span id="voice-status-text">🎙 音声を聞いています…</span></div>
     ${adminScopeBarHtml()}
     <div id="home-body"></div>
   `;
   if(root._q){ $('search-box').focus(); renderSearchResults(root._q); }
   else renderDashboard();
+  if(voiceListening){ updateMicButtonUI(); showVoiceStatus('🎙 音声を聞いています…'); } // 再描画をまたいでも聞いている表示を保つ
 }
 function adminScopeBarHtml(){
   if(!isAdmin()) return '';
@@ -659,6 +670,116 @@ function clearSearch(){
   $('search-box').value='';
   document.querySelector('.search-clear').classList.remove('show');
   renderDashboard();
+}
+
+/* ============================================================
+   音声検索（Web Speech API / ブラウザ標準機能のみ・外部送信サーバー等の追加実装なし）
+   注意：iPhone/iPad の Safari（ホーム画面に追加したPWA含む）は、
+   本稿執筆時点でこのAPIに対応していません。対応状況は端末ごとに異なるため、
+   利用可否は毎回 voiceSearchSupported() で実機判定し、非対応時は
+   「利用できません」と案内するだけに留め、他の機能には一切影響させません。
+============================================================ */
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+let voiceRecognizer = null;
+let voiceListening = false;
+
+function voiceSearchSupported(){
+  return !!SpeechRecognitionCtor;
+}
+function updateMicButtonUI(){
+  const btn = $('voice-mic-btn');
+  if(!btn) return;
+  btn.classList.toggle('listening', voiceListening);
+  btn.classList.toggle('unsupported', !voiceSearchSupported());
+}
+function showVoiceStatus(text){
+  const el = $('voice-status');
+  if(!el) return;
+  const t = $('voice-status-text');
+  if(t) t.textContent = text;
+  el.classList.add('show');
+}
+function hideVoiceStatus(){
+  const el = $('voice-status');
+  if(el) el.classList.remove('show');
+}
+function toggleVoiceSearch(){
+  if(!voiceSearchSupported()){
+    toast('この端末・ブラウザでは音声検索を利用できません','var(--rd)');
+    return;
+  }
+  if(voiceListening){
+    if(voiceRecognizer){ try{ voiceRecognizer.stop(); }catch(e){} }
+    return;
+  }
+  startVoiceSearch();
+}
+function startVoiceSearch(){
+  let rec;
+  try{
+    rec = new SpeechRecognitionCtor();
+  }catch(e){
+    toast('この端末・ブラウザでは音声検索を利用できません','var(--rd)');
+    return;
+  }
+  voiceRecognizer = rec;
+  rec.lang = 'ja-JP';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+
+  rec.onresult = (ev)=>{
+    const transcript = (ev.results && ev.results[0] && ev.results[0][0]) ? ev.results[0][0].transcript.trim() : '';
+    if(!transcript){
+      toast('音声を認識できませんでした。もう一度お試しください。','var(--rd)');
+      return;
+    }
+    applyVoiceSearchText(transcript);
+  };
+  rec.onerror = (ev)=>{
+    if(ev.error === 'not-allowed' || ev.error === 'service-not-allowed'){
+      toast('マイクの使用が許可されていません。ブラウザやOSの設定でこのサイトのマイクへのアクセスを許可してください。','var(--rd)');
+    } else {
+      toast('音声を認識できませんでした。もう一度お試しください。','var(--rd)');
+    }
+  };
+  rec.onend = ()=>{
+    voiceListening = false;
+    updateMicButtonUI();
+    hideVoiceStatus();
+  };
+
+  voiceListening = true;
+  updateMicButtonUI();
+  showVoiceStatus('🎙 音声を聞いています…');
+  try{
+    rec.start();
+  }catch(e){
+    voiceListening = false;
+    updateMicButtonUI();
+    hideVoiceStatus();
+    toast('音声を認識できませんでした。もう一度お試しください。','var(--rd)');
+  }
+}
+// 「五番」「5番」のような読み上げは、できる範囲で数字としても検索を試みる
+// （「ナンバーワン」のような言い回しは番号との対応が不確実なため対象外）
+const KANJI_NUM_MAP = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+function extractSpokenNumber(text){
+  const m = String(text||'').match(/([0-9]+|[一二三四五六七八九十])\s*番/);
+  if(!m) return null;
+  const raw = m[1];
+  if(/^[0-9]+$/.test(raw)) return raw;
+  return KANJI_NUM_MAP[raw] ? String(KANJI_NUM_MAP[raw]) : null;
+}
+function applyVoiceSearchText(transcript){
+  const box = $('search-box');
+  if(!box) return;
+  box.value = transcript;
+  onSearchInput();
+  const noHit = $('home-body') && $('home-body').querySelector('.empty-hint');
+  if(noHit){
+    const num = extractSpokenNumber(transcript);
+    if(num){ box.value = num; onSearchInput(); }
+  }
 }
 function scopedCustomers(){
   const ids=activeScopeIds();
