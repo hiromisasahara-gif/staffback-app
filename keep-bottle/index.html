@@ -363,14 +363,65 @@ function normalizeKanaText(str){
   const hira = katakanaToHiragana(String(str).normalize('NFKC'));
   return hira.trim().replace(/[\s　]+/g,' ');
 }
-// 検索比較専用：大文字/小文字・全角/半角・ひらがな/カタカナ・空白の違いをすべて吸収する
+// 大文字/小文字・全角/半角・ひらがな/カタカナの違いだけを吸収する下地（記号・空白はここでは触らない）
+function normalizeChars(str){
+  return katakanaToHiragana(String(str||'').normalize('NFKC')).toLowerCase();
+}
+const SEARCH_PUNCT_RE = /[。、,.!?！？…・･]/g; // 検索時に無視する記号（音声認識結果に付きやすいものを含む）
+// 検索比較専用：大文字/小文字・全角/半角・ひらがな/カタカナ・記号・空白の違いをすべて吸収する（1本の文字列として厳密一致・部分一致を見る用）
 function normalizeForSearch(str){
   if(!str) return '';
-  let s = katakanaToHiragana(String(str).normalize('NFKC')).toLowerCase();
-  s = s.replace(/[。、,.!?！？…]+/g,''); // 音声認識結果に付きやすい句読点等を除去
+  let s = normalizeChars(str);
+  s = s.replace(SEARCH_PUNCT_RE,''); // 記号を除去
   s = s.trim().replace(/[\s　]+/g,''); // 前後・連続する空白を除去
   s = s.replace(/(さん|様)$/,''); // 末尾の敬称（さん／様）を除去
   return s;
+}
+// 検索比較用：記号やスペースを「単語の区切り」として複数語に分割する（部分一致・複数語検索、あいまい一致の元データ用）
+function tokenizeForSearch(str){
+  if(!str) return [];
+  const s = normalizeChars(str);
+  return s.split(/[。、,.!?！？…・･\s　]+/)
+    .map(t=>t.replace(/(さん|様)$/,''))
+    .filter(Boolean);
+}
+// 簡易レーベンシュタイン距離（音声認識特有の軽微な誤変換を吸収するためのあいまい一致用）
+function levenshteinDistance(a,b){
+  const al=a.length, bl=b.length;
+  if(al===0) return bl;
+  if(bl===0) return al;
+  let prev = new Array(bl+1);
+  for(let j=0;j<=bl;j++) prev[j]=j;
+  for(let i=1;i<=al;i++){
+    const cur=[i];
+    for(let j=1;j<=bl;j++){
+      const cost = a[i-1]===b[j-1] ? 0 : 1;
+      cur[j] = Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);
+    }
+    prev = cur;
+  }
+  return prev[bl];
+}
+function searchSimilarity(a,b){
+  if(!a || !b) return 0;
+  const dist = levenshteinDistance(a,b);
+  return 1 - dist/Math.max(a.length,b.length);
+}
+const FUZZY_MATCH_THRESHOLD = 0.6; // これ未満は「別物」とみなして候補に出さない
+// 1つの項目（お客様名・フリガナ・銘柄名など）に対する一致度を返す。
+// 3=通常の部分一致（従来通り） / 2=複数語すべてが個別に含まれる語順違い一致 / 1〜1.5=音声認識のゆらぎを想定したあいまい一致 / 0=不一致
+function fieldMatchScore(fieldValue, queryNorm, queryTokens){
+  if(!fieldValue) return 0;
+  const normField = normalizeForSearch(fieldValue);
+  if(!normField) return 0;
+  if(queryNorm && normField.includes(queryNorm)) return 3;
+  if(queryTokens.length>1 && queryTokens.every(t=>normField.includes(t))) return 2;
+  if(queryTokens.some(t=>t.length>=2 && normField.includes(t))) return 2;
+  if(queryNorm.length>=2){
+    const sim = searchSimilarity(queryNorm, normField);
+    if(sim>=FUZZY_MATCH_THRESHOLD) return 1+sim*0.5;
+  }
+  return 0;
 }
 function toast(msg,color){
   const t=$('toast');
@@ -792,22 +843,36 @@ function scopedBottles(){
   const ids=activeScopeIds();
   return bottles.filter(b=>ids.includes(b.store_id));
 }
+// お客様1名分の一致度（氏名・フリガナ・会社名・領収書名・所有ボトルの銘柄／番号のうち最も強い一致を採用）
+function customerSearchScore(c, custBottles, queryNorm, queryTokens){
+  let best=0;
+  [c.name,c.kana,c.company,c.receipt_name].forEach(v=>{
+    best = Math.max(best, fieldMatchScore(v, queryNorm, queryTokens));
+  });
+  custBottles.forEach(b=>{
+    if(b.brand_name) best = Math.max(best, fieldMatchScore(b.brand_name, queryNorm, queryTokens));
+    if(queryNorm && String(b.number).includes(queryNorm)) best = Math.max(best, 3); // 番号はあいまい一致の対象外（数字は完全一致寄りが安全）
+  });
+  return best;
+}
 function renderSearchResults(q){
-  const query=normalizeForSearch(q);
+  const queryNorm = normalizeForSearch(q);
+  const queryTokens = tokenizeForSearch(q);
   const custs=scopedCustomers();
   const bts=scopedBottles();
-  const matched = custs.filter(c=>{
-    if([c.name,c.kana,c.company,c.receipt_name].some(v=>v&&normalizeForSearch(v).includes(query))) return true;
+  const matched = custs.map(c=>{
     const cb = bts.filter(b=>b.customer_id===c.id);
-    return cb.some(b=> (b.brand_name&&normalizeForSearch(b.brand_name).includes(query)) || String(b.number).includes(query));
-  }).slice(0,60);
+    return {c, cb, score: customerSearchScore(c, cb, queryNorm, queryTokens)};
+  }).filter(x=>x.score>0)
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,60);
 
   const body=$('home-body');
   if(!matched.length){
     body.innerHTML = `<div class="empty-hint">「${esc(q)}」に一致するお客様が見つかりません</div>`;
     return;
   }
-  body.innerHTML = matched.map(c=>{
+  body.innerHTML = matched.map(({c})=>{
     const cb = bts.filter(b=>b.customer_id===c.id && b.status==='keeping');
     const bottlesHtml = cb.length
       ? `<div class="result-bottles">${cb.map(b=>`<div class="bottle-chip ${b.display_status}"><div class="bc-brand">${esc(b.brand_name)}</div><div class="bc-num">No.${b.number}</div></div>`).join('')}</div>`
